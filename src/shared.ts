@@ -1,4 +1,4 @@
-export type Phase = 'idle' | 'preparing' | 'starting' | 'qr' | 'connecting' | 'online' | 'reconnecting' | 'error';
+export type Phase = 'idle' | 'preparing' | 'starting' | 'qr' | 'connecting' | 'online' | 'reconnecting' | 'stopping' | 'error';
 export interface ConnectionConfig {
   wsUrl: string;
   accessToken: string;
@@ -16,6 +16,8 @@ export interface Message {
 export interface QQInstallation { path: string; version: string; architecture: string; platform: string }
 export interface AppState {
   phase: Phase; detail: string; error?: string; qr?: string; account?: Account;
+  // Archive context survives disconnect; account is only the confirmed live session.
+  localAccount?: Account;
   groups: Group[]; runtime: 'managed' | 'external' | null; qq?: QQInstallation;
   archived: number; lastEventAt?: number; logs: { time: number; text: string }[];
   historyBusy: boolean;

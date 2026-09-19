@@ -10,6 +10,7 @@ import { NapCatManagement } from '../electron/core/management';
 import { validateEndpoint } from '../electron/core/validation';
 import { AppService } from '../electron/core/service';
 import { mockNapCat, sample } from './fixtures';
+import type { AppState } from '../src/shared';
 
 test('OneBot correlates out-of-order replies and keeps group events separate', async () => {
   const fixture = await mockNapCat();
@@ -107,7 +108,9 @@ test('End-to-end service: groups, paged history, live dedup, export, offline rea
     assert.equal(service.state.archived, 6);
     const file = await service.request({ type: 'export', groupId: '731234567' }) as string;
     assert.equal((await readFile(file, 'utf8')).trim().split('\n').length, 6);
-    await service.request({ type: 'disconnect' });
+    const disconnecting = service.request({ type: 'disconnect' });
+    assert.equal(service.state.account, undefined, 'disconnect must clear the active account');
+    await disconnecting;
     assert.equal((await service.request({ type: 'messages', groupId: '731234567', search: '', offset: 0 }) as any).total, 6);
     await service.request({ type: 'connect', config: fixture.config });
     // Reconnect refreshes followed groups from a new, recent anchor.
@@ -118,4 +121,53 @@ test('End-to-end service: groups, paged history, live dedup, export, offline rea
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.equal(service.state.archived, 6);
   } finally { await service.close(); await fixture.close(); await rm(folder, { recursive: true, force: true }); }
+});
+
+test('Saved archives never appear as a logged-in account, including after cancelling pending login', async () => {
+  const fixture = await mockNapCat();
+  const store = new Store(':memory:');
+  const saved = { id: '100010001', nickname: '上次登录的账号' };
+  store.saveAccount(saved);
+  store.saveGroups(saved.id, [{ group_id: 731234567, group_name: '已归档的群' }]);
+  store.put([normalizeMessage(sample(1, '离线保留的消息'), saved.id)]);
+  const snapshots: AppState[] = [];
+  const service = new AppService(os.tmpdir(), store, event => {
+    if (event.type === 'state') snapshots.push(structuredClone(event.state));
+  });
+  try {
+    assert.equal(service.state.phase, 'idle');
+    assert.equal(service.state.account, undefined, 'startup must not restore an active login from the archive');
+    const immediateConnect = service.request({ type: 'connect', config: fixture.config });
+    await Promise.all([immediateConnect, service.disconnect()]);
+    assert.equal(service.state.phase, 'idle');
+    assert.equal(fixture.calls.length, 0, 'an immediately cancelled attempt must not open a new session');
+    for (const action of ['get_login_info', 'get_group_list']) {
+      const held = fixture.holdNext(action);
+      const connecting = service.request({ type: 'connect', config: fixture.config });
+      await held.requested;
+      assert.equal(service.state.phase, 'connecting');
+      assert.equal(service.state.account, undefined, 'identity is published only after connection succeeds');
+      const cancelledAt = snapshots.length;
+      const disconnecting = service.disconnect();
+      assert.equal(service.state.account, undefined, 'clear identity before component shutdown completes');
+      held.release();
+      await Promise.all([connecting, disconnecting]);
+      assert.equal(service.state.phase, 'idle');
+      assert.ok(snapshots.slice(cancelledAt).every(state => !state.account && state.phase !== 'online'));
+      assert.equal((await service.request({ type: 'messages', groupId: '731234567', search: '', offset: 0 }) as any).total, 1);
+    }
+    await service.request({ type: 'connect', config: fixture.config });
+    assert.equal((await service.request({ type: 'state' }) as AppState).account?.id, saved.id);
+    await service.disconnect();
+    await assert.rejects(service.request({ type: 'connect', config: { ...fixture.config, accessToken: 'wrong', webuiUrl: '' } }));
+    assert.equal(service.state.phase, 'error');
+    assert.equal(service.state.account, undefined);
+    fixture.setAccount({ user_id: 100010002, nickname: '\u3000\u3000' });
+    await service.request({ type: 'connect', config: fixture.config });
+    const switched = await service.request({ type: 'state' }) as AppState;
+    assert.deepEqual(switched.account, { id: '100010002', nickname: 'QQ 用户' });
+    assert.equal(switched.localAccount?.id, '100010002');
+    assert.equal(switched.archived, 0);
+    assert.equal(store.count(saved.id), 1, 'switching accounts preserves the previous archive');
+  } finally { await service.close(); await fixture.close(); }
 });

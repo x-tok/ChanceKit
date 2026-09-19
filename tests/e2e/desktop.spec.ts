@@ -14,7 +14,9 @@ test('desktop connects to NapCat, archives history and live messages, and render
   const page = await app.firstWindow();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
+  const sidebar = page.locator('aside');
   try {
+    await page.route('https://q1.qlogo.cn/**', route => route.fulfill({ contentType: 'image/png', path: 'build/icon.png' }));
     await expect(page).toHaveTitle('见机');
     expect(await app.evaluate(({ app }) => app.getName())).toBe('见机');
     await expect(page.getByRole('heading', { name: '连接你的 QQ' })).toBeVisible();
@@ -32,6 +34,8 @@ test('desktop connects to NapCat, archives history and live messages, and render
     await page.screenshot({ path: 'test-results/qr-desktop.png' });
     fixture.setLoggedIn(true);
     await expect(page.getByRole('heading', { name: '账号已连接' })).toBeVisible({ timeout: 15_000 });
+    await expect(sidebar.locator('img')).toHaveAttribute('src', /nk=100010001&/);
+    await expect.poll(() => sidebar.locator('img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
     await page.getByRole('button', { name: '查看群聊' }).click();
     await page.getByRole('button', { name: /2027 届校园招聘/ }).click();
     await page.getByRole('button', { name: '关注', exact: true }).click();
@@ -51,12 +55,56 @@ test('desktop connects to NapCat, archives history and live messages, and render
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.screenshot({ path: `test-results/messages-${width}x${height}.png` });
     }
+    const resuming = fixture.holdNext('get_login_info');
     fixture.drop();
     await expect(page.getByText('重连中', { exact: true })).toBeVisible();
+    await expect(sidebar.getByText('未登录账号')).toBeVisible();
+    await expect(sidebar.locator('img')).toHaveCount(0);
+    await resuming.requested;
+    resuming.release();
     await expect(page.getByText('已连接', { exact: true })).toBeVisible({ timeout: 15_000 });
     await page.getByRole('button', { name: /实习机会/ }).click();
     await page.getByRole('button', { name: '获取消息记录', exact: true }).click();
     await expect(page.getByText('QQ 当前没有可获取的记录', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '连接 QQ', exact: true }).first().click();
+    await page.getByRole('button', { name: '停止连接', exact: true }).click();
+    await expect(sidebar.getByText('未登录账号')).toBeVisible();
+    await expect(sidebar.getByText('100010001', { exact: true })).toHaveCount(0);
+    await expect(sidebar.locator('img')).toHaveCount(0);
+    await page.screenshot({ path: 'test-results/account-disconnected.png' });
+    await page.getByRole('button', { name: /^群消息/ }).click();
+    await page.getByRole('button', { name: /2027 届校园招聘/ }).click();
+    await expect(page.getByText('实时消息已通过 WebSocket 到达（测试）。', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '连接 QQ', exact: true }).first().click();
+    fixture.setLoggedIn(false);
+    await page.getByRole('button', { name: '连接 QQ', exact: true }).last().click();
+    await expect(page.getByAltText('QQ 登录二维码')).toBeVisible();
+    await expect(sidebar.getByText('未登录账号')).toBeVisible();
+    await page.getByRole('button', { name: '停止连接', exact: true }).click();
+    await expect(page.getByAltText('QQ 登录二维码')).toHaveCount(0);
+    await expect(sidebar.locator('img')).toHaveCount(0);
+
+    // A failed avatar and a whitespace-only nickname must not poison the next login.
+    await page.unroute('https://q1.qlogo.cn/**');
+    await page.route('https://q1.qlogo.cn/**', route => route.abort());
+    fixture.setAccount({ user_id: 100010002, nickname: '\u3000\u3000' });
+    fixture.setLoggedIn(true);
+    await page.getByRole('button', { name: '连接 QQ', exact: true }).last().click();
+    await expect(page.getByRole('heading', { name: '账号已连接' })).toBeVisible();
+    await expect(sidebar.getByText('QQ 用户')).toBeVisible();
+    await expect(sidebar.locator('img')).toHaveCount(0);
+    await expect(sidebar.getByText('Q', { exact: true })).toBeVisible();
+    await page.screenshot({ path: 'test-results/account-avatar-fallback.png' });
+    await page.getByRole('button', { name: '停止连接', exact: true }).click();
+    await expect(sidebar.getByText('未登录账号')).toBeVisible();
+    await page.unroute('https://q1.qlogo.cn/**');
+    await page.route('https://q1.qlogo.cn/**', route => route.fulfill({ contentType: 'image/png', path: 'build/icon.png' }));
+    fixture.setAccount({ user_id: 100010003, nickname: '另一个账号' });
+    await page.getByRole('button', { name: '连接 QQ', exact: true }).last().click();
+    await expect(sidebar.getByText('另一个账号')).toBeVisible();
+    await expect(sidebar.locator('img')).toHaveAttribute('src', /nk=100010003&/);
+    await expect.poll(() => sidebar.locator('img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+    await page.screenshot({ path: 'test-results/account-switched.png' });
     await expect(page.getByRole('alert')).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally { await app.close(); await fixture.close(); await rm(folder, { recursive: true, force: true }); }

@@ -21,16 +21,17 @@ export class AppService {
   private runtime: RuntimeManager;
   private connectionBusy = false;
   private historyGeneration = 0;
+  private stopping?: Promise<void>;
 
   constructor(private root: string, private store: Store, private emit: (event: AppEvent) => void, componentArchive = '') {
     this.runtime = new RuntimeManager(path.join(root, 'runtime'), text => { this.patch({ detail: text }); this.log(text); }, text => {
       this.generation++;
       clearTimeout(this.timer);
       this.bot?.close(); this.bot = undefined;
-      this.patch({ phase: 'error', error: text, detail: '连接组件已停止', qr: undefined });
+      this.patch({ phase: 'error', account: undefined, error: text, detail: '连接组件已停止', qr: undefined });
       this.log(text);
     }, componentArchive);
-    this.state.account = store.lastAccount();
+    this.state.localAccount = store.lastAccount();
     this.reloadLocal();
   }
 
@@ -40,12 +41,12 @@ export class AppService {
     this.emit({ type: 'state', state: this.state });
   }
   private reloadLocal() {
-    const id = this.state.account?.id;
+    const id = this.state.localAccount?.id;
     this.patch({ groups: id ? this.store.groups(id) : [], archived: id ? this.store.count(id) : 0 });
   }
   private accountId() {
-    if (!this.state.account) throw new Error('尚无已登录账号。');
-    return this.state.account.id;
+    if (!this.state.localAccount) throw new Error('尚无账号记录。');
+    return this.state.localAccount.id;
   }
   private requireGroup(id: string) {
     if (!this.state.groups.some(group => group.id === id)) throw new Error('当前账号没有这个群聊。');
@@ -62,21 +63,27 @@ export class AppService {
       case 'start': {
         if (this.connectionBusy) throw new Error('正在准备连接，请稍候。');
         this.connectionBusy = true;
-        await this.disconnect();
+        const stopping = this.disconnect();
         const generation = this.generation;
-        this.patch({ phase: 'preparing', detail: '正在检查官方 QQ', runtime: 'managed', error: undefined });
         try {
+          await stopping;
+          if (generation !== this.generation) return;
+          this.patch({ phase: 'preparing', detail: '正在检查官方 QQ', runtime: 'managed', error: undefined });
           const qq = await detectQQ(command.path);
+          if (generation !== this.generation) return;
           if (!qq) throw new Error('没有找到官方 QQ，请先自行下载安装。');
           this.patch({ qq });
-          const config = await this.runtime.start(qq, this.state.account?.id);
+          const config = await this.runtime.start(qq, this.state.localAccount?.id);
           if (generation !== this.generation) { await this.runtime.stop(); return; }
           this.config = config;
           this.management = new NapCatManagement(config.webuiUrl, config.webuiToken);
           this.patch({ phase: 'starting', detail: '正在等待 QQ 登录服务' });
           void this.pollLogin(generation, Date.now() + 120_000);
         } catch (error) {
-          if (generation === this.generation) { await this.runtime.stop(); this.patch({ phase: 'error', error: errorText(error), detail: '连接未完成' }); }
+          if (generation !== this.generation) return;
+          await this.runtime.stop();
+          if (generation !== this.generation) return;
+          this.patch({ phase: 'error', account: undefined, error: errorText(error), detail: '连接未完成' });
           throw error;
         } finally { this.connectionBusy = false; }
         return;
@@ -86,11 +93,13 @@ export class AppService {
         validateEndpoint(command.config.wsUrl, 'ws');
         if (command.config.webuiUrl) validateEndpoint(command.config.webuiUrl, 'http');
         this.connectionBusy = true;
-        await this.disconnect();
+        const stopping = this.disconnect();
         const generation = this.generation;
-        this.config = command.config;
-        this.patch({ runtime: 'external', phase: 'connecting', detail: '正在连接 NapCat', error: undefined });
         try {
+          await stopping;
+          if (generation !== this.generation) return;
+          this.config = command.config;
+          this.patch({ runtime: 'external', phase: 'connecting', detail: '正在连接 NapCat', error: undefined });
           if (command.config.webuiUrl) {
             this.management = new NapCatManagement(command.config.webuiUrl, command.config.webuiToken);
             const status = await this.management.status();
@@ -103,7 +112,8 @@ export class AppService {
           }
           await this.openBot(generation);
         } catch (error) {
-          if (generation === this.generation) this.patch({ phase: 'error', detail: '连接未完成', error: errorText(error) });
+          if (generation !== this.generation) return;
+          this.patch({ phase: 'error', account: undefined, detail: '连接未完成', error: errorText(error) });
           throw error;
         } finally { this.connectionBusy = false; }
         return;
@@ -111,7 +121,9 @@ export class AppService {
       case 'disconnect': await this.disconnect(); return;
       case 'refreshQR': {
         if (!this.management) throw new Error('扫码登录需要连接 NapCat 的登录管理服务。');
+        const generation = this.generation;
         await this.management.refreshQR();
+        if (generation !== this.generation) return;
         this.patch({ error: undefined, qr: undefined, detail: '正在刷新二维码' }); return;
       }
       case 'refreshGroups': await this.refreshGroups(); return;
@@ -137,13 +149,14 @@ export class AppService {
         await this.openBot(generation);
         return;
       }
-      this.patch({ phase: 'qr', qr: status.qrcodeurl || undefined, detail: status.isOffline ? 'QQ 已离线，请重新扫码' : '等待 QQ 扫码确认', error: status.loginError || undefined });
+      this.patch({ phase: 'qr', account: undefined, qr: status.qrcodeurl || undefined, detail: status.isOffline ? 'QQ 已离线，请重新扫码' : '等待 QQ 扫码确认', error: status.loginError || undefined });
       deadline = Date.now() + 30_000;
     } catch (error) {
       if (generation !== this.generation) return;
       if (Date.now() > deadline) {
         if (this.state.runtime === 'managed') await this.runtime.stop();
-        this.patch({ phase: 'error', detail: '登录服务未就绪', error: errorText(error) }); return;
+        if (generation !== this.generation) return;
+        this.patch({ phase: 'error', account: undefined, detail: '登录服务未就绪', error: errorText(error) }); return;
       }
     }
     if (generation === this.generation) this.timer = setTimeout(() => { void this.pollLogin(generation, deadline); }, 2500);
@@ -151,7 +164,7 @@ export class AppService {
 
   private async openBot(generation: number) {
     if (generation !== this.generation || !this.config) return;
-    this.patch({ phase: 'connecting', detail: 'QQ 已登录，正在读取群列表', error: undefined, qr: undefined });
+    this.patch({ phase: 'connecting', account: undefined, detail: 'QQ 已登录，正在读取群列表', error: undefined, qr: undefined });
     const bot = new OneBot();
     this.bot?.close();
     this.bot = bot;
@@ -165,7 +178,7 @@ export class AppService {
     bot.on('disconnected', () => {
       if (!ready || generation !== this.generation || this.bot !== bot) return;
       this.cursors.clear();
-      this.patch({ phase: 'reconnecting', detail: '连接中断，正在重连', error: undefined });
+      this.patch({ phase: 'reconnecting', account: undefined, detail: '连接中断，正在重连', error: undefined });
       this.scheduleReconnect(generation);
     });
     try {
@@ -173,13 +186,13 @@ export class AppService {
       const raw = await bot.call('get_login_info');
       if (generation !== this.generation || this.bot !== bot) { bot.close(); return; }
       if (!raw?.user_id) throw new Error('QQ 尚未完成登录。');
-      const account: Account = { id: String(raw.user_id), nickname: String(raw.nickname || raw.user_id) };
-      this.store.saveAccount(account);
-      this.patch({ account });
-      this.reloadLocal();
-      await this.refreshGroups();
+      const account: Account = { id: String(raw.user_id), nickname: String(raw.nickname ?? '').trim() || 'QQ 用户' };
+      const groups = await this.fetchGroups(bot);
       if (generation !== this.generation || this.bot !== bot) return;
-      this.patch({ phase: 'online', detail: 'QQ 已连接，正在接收关注群消息', error: undefined });
+      this.store.saveAccount(account);
+      this.store.saveGroups(account.id, groups);
+      this.patch({ phase: 'online', account, localAccount: account, groups: this.store.groups(account.id), archived: this.store.count(account.id),
+        lastEventAt: undefined, detail: 'QQ 已连接，正在接收关注群消息', error: undefined });
       this.log('QQ 连接成功，群列表已更新');
       ready = true;
       for (const event of buffered) this.handleEvent(event);
@@ -211,7 +224,7 @@ export class AppService {
   private handleEvent(event: any) {
     if (!this.state.account || String(event.self_id) !== this.state.account.id) return;
     if (event.meta_event_type === 'heartbeat' && event.status?.online === false) {
-      this.patch({ phase: 'reconnecting', detail: 'QQ 已离线，等待恢复' });
+      this.patch({ phase: 'reconnecting', account: undefined, detail: 'QQ 已离线，等待恢复' });
       this.bot?.close(); this.bot = undefined;
       if (this.management) void this.pollLogin(this.generation, Date.now() + 30_000);
       else this.scheduleReconnect(this.generation);
@@ -229,14 +242,20 @@ export class AppService {
   }
 
   private async refreshGroups() {
-    if (!this.bot) throw new Error('请先连接 QQ。');
+    const bot = this.bot;
+    const accountId = this.state.account?.id;
+    if (!bot || !accountId || this.state.phase !== 'online') throw new Error('请先连接 QQ。');
     const generation = this.generation;
-    const accountId = this.accountId();
-    const groups = await this.bot.call('get_group_list', { no_cache: true });
-    if (generation !== this.generation || accountId !== this.state.account?.id) return;
-    if (!Array.isArray(groups)) throw new Error('群列表响应格式不正确。');
-    this.store.saveGroups(accountId, groups.filter(g => g?.group_id));
+    const groups = await this.fetchGroups(bot);
+    if (generation !== this.generation || this.bot !== bot || accountId !== this.state.account?.id) return;
+    this.store.saveGroups(accountId, groups);
     this.reloadLocal();
+  }
+
+  private async fetchGroups(bot: OneBot) {
+    const groups = await bot.call('get_group_list', { no_cache: true });
+    if (!Array.isArray(groups)) throw new Error('群列表响应格式不正确。');
+    return groups.filter(group => group?.group_id);
   }
 
   private async history(groupId: string, older: boolean): Promise<HistoryResult> {
@@ -288,15 +307,17 @@ export class AppService {
   }
 
   async disconnect() {
-    this.generation++;
+    const generation = ++this.generation;
     this.historyGeneration++;
     clearTimeout(this.timer);
     this.bot?.close(); this.bot = undefined;
     this.management = undefined;
     this.config = undefined;
     this.cursors.clear();
-    await this.runtime.stop();
-    this.patch({ phase: 'idle', detail: '采集已停止，本地记录仍可查看', error: undefined, qr: undefined, historyBusy: false });
+    this.patch({ phase: 'stopping', account: undefined, detail: '正在停止连接', error: undefined, qr: undefined, historyBusy: false, lastEventAt: undefined });
+    this.stopping ??= this.runtime.stop().finally(() => { this.stopping = undefined; });
+    await this.stopping;
+    if (generation === this.generation) this.patch({ phase: 'idle', detail: '采集已停止，本地记录仍可查看' });
   }
   async close() { await this.disconnect(); this.store.close(); }
 }

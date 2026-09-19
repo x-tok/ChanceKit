@@ -11,6 +11,8 @@ export const sample = (id: number, text: string, groupId = 731234567) => ({
 export async function mockNapCat() {
   const calls: { action: string; params: any }[] = [];
   let loggedIn = true;
+  let account = { user_id: 100010001, nickname: '见机测试账号' };
+  const held = new Map<string, (reply: () => void) => void>();
   let qrRefreshed = 0;
   const server = createServer(async (req, res) => {
     let data = '';
@@ -33,8 +35,12 @@ export async function mockNapCat() {
     socket.on('message', bytes => {
       const { action, params, echo } = JSON.parse(bytes.toString());
       calls.push({ action, params });
-      const ok = (data: unknown) => socket.send(JSON.stringify({ status: 'ok', retcode: 0, data, echo }));
-      if (action === 'get_login_info') return ok({ user_id: 100010001, nickname: '见机测试账号' });
+      const ok = (data: unknown) => {
+        const reply = () => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ status: 'ok', retcode: 0, data, echo })); };
+        const hold = held.get(action);
+        if (hold) { held.delete(action); hold(reply); } else reply();
+      };
+      if (action === 'get_login_info') return ok(account);
       if (action === 'get_group_list') return ok([
         { group_id: 731234567, group_name: '2027 届校园招聘信息交流（测试）', member_count: 387, max_member_count: 500 },
         { group_id: 731234568, group_name: '宣讲会与双选会通知（测试）', member_count: 216, max_member_count: 500 },
@@ -61,6 +67,12 @@ export async function mockNapCat() {
   return {
     config: { wsUrl: `ws://127.0.0.1:${port}`, accessToken: 'test-onebot', webuiUrl: `http://127.0.0.1:${port}`, webuiToken: 'test-management' }, calls,
     setLoggedIn: (value: boolean) => { loggedIn = value; },
+    setAccount: (value: typeof account) => { account = value; },
+    holdNext: (action: string) => {
+      let release = () => {};
+      const requested = new Promise<void>(resolve => held.set(action, reply => { release = reply; resolve(); }));
+      return { requested, release: () => release() };
+    },
     push: (event: unknown) => { for (const client of wss.clients) if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(event)); },
     drop: () => { for (const client of wss.clients) client.terminate(); },
     close: async () => { for (const client of wss.clients) client.terminate(); await new Promise<void>(resolve => wss.close(() => server.close(() => resolve()))); },

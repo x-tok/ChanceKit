@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, Check, CheckCheck, ChevronDown, ChevronUp, CircleHelp, Copy, Download, ExternalLink, FileText, FolderOpen, Hash, ImageOff, Link2, LoaderCircle, MessageCircle, Monitor, Plug, QrCode, RefreshCw, Search, ShieldCheck, Square, Star, Unplug, Users, Wifi, X } from 'lucide-react';
 import QRCode from 'qrcode';
-import type { AppState, ConnectionConfig, Group, HistoryResult, Message, MessagePage, QQInstallation, Segment } from './shared';
+import type { Account, AppState, ConnectionConfig, Group, HistoryResult, Message, MessagePage, QQInstallation, Segment } from './shared';
 import { bridge, isDesktop } from './bridge';
 import { BRAND } from './brand';
 import s from './App.module.css';
 
 const initialState: AppState = { phase: 'idle', detail: '尚未连接 QQ', runtime: null, groups: [], archived: 0, historyBusy: false, logs: [] };
-const phases = { idle: '未连接', preparing: '准备中', starting: '启动中', qr: '待扫码', connecting: '连接中', online: '已连接', reconnecting: '重连中', error: '连接异常' };
+const phases = { idle: '未连接', preparing: '准备中', starting: '启动中', qr: '待扫码', connecting: '连接中', online: '已连接', reconnecting: '重连中', stopping: '停止中', error: '连接异常' };
+const accountName = (account: Account) => account.nickname.trim() || 'QQ 用户';
 const number = new Intl.NumberFormat('zh-CN');
 const time = (value: number) => new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 const date = (value: number) => new Date(value).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' });
@@ -17,9 +18,10 @@ function IconButton({ label, children, onClick, disabled = false, className = ''
   return <button type="button" title={label} aria-label={label} disabled={disabled} onClick={onClick} className={`${s.iconButton} ${className}`}>{children}</button>;
 }
 function Avatar({ name, id, size = 'normal' }: { name: string; id?: string; size?: 'normal' | 'large' }) {
-  const [failed, setFailed] = useState(false);
+  const [failedId, setFailedId] = useState<string>();
+  useEffect(() => { setFailedId(undefined); }, [id]);
   return <span className={`${s.avatar} ${size === 'large' ? s.largeAvatar : ''}`} aria-hidden="true">
-    {id && !failed ? <img src={`https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(id)}&s=100`} alt="" width={48} height={48} onError={() => setFailed(true)} /> : name.slice(0, 1)}
+    {id && failedId !== id ? <img key={id} src={`https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(id)}&s=100`} alt="" width={48} height={48} onError={() => setFailedId(id)} /> : Array.from(name.trim() || 'Q')[0]}
   </span>;
 }
 
@@ -31,6 +33,7 @@ export function App() {
   const [messageRevision, setMessageRevision] = useState(0);
   const previousAccount = useRef('');
   const online = state.phase === 'online';
+  const account = online ? state.account : undefined;
   const notify = useCallback((text: string) => setToast(text), []);
   const run = useCallback(async (action: () => Promise<unknown>) => { try { await action(); } catch (error) { notify(messageError(error)); } }, [notify]);
   useEffect(() => {
@@ -41,8 +44,9 @@ export function App() {
     });
   }, [notify]);
   useEffect(() => {
-    if (state.account?.id && previousAccount.current !== state.account.id) { previousAccount.current = state.account.id; setSelected(''); }
-  }, [state.account?.id]);
+    const id = state.localAccount?.id || '';
+    if (previousAccount.current !== id) { previousAccount.current = id; setSelected(''); }
+  }, [state.localAccount?.id]);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 8000); return () => clearTimeout(timer); }, [toast]);
   const selectedGroup = state.groups.find(group => group.id === selected);
   return <div className={s.app}>
@@ -58,7 +62,7 @@ export function App() {
       </nav>
       <div className={s.navBottom}>
         <span className={s.localLabel}><ShieldCheck size={15} /> 本地消息库</span>
-        <div className={s.navAccount}><Avatar name={state.account?.nickname || 'Q'} /><span>{state.account?.nickname || '未登录账号'}<small>{state.account?.id || 'QQ'}</small></span></div>
+        <div className={s.navAccount}><Avatar key={account?.id || 'offline'} name={account ? accountName(account) : 'Q'} id={account?.id} /><span>{account ? accountName(account) : '未登录账号'}<small>{account?.id || 'QQ'}</small></span></div>
       </div>
     </aside>
     <main id="main-content" className={s.main}>
@@ -67,7 +71,7 @@ export function App() {
         <div className={s.topbarRight}>{!isDesktop && <span className={s.previewBadge}>浏览器预览</span>}<span className={`${s.connectionStatus} ${online ? s.connected : ''}`}><span />{phases[state.phase]}</span></div>
       </header>
       {view === 'connect' ? <Connection state={state} run={run} onMessages={() => setView('messages')} />
-        : <Workspace state={state} group={selectedGroup} select={setSelected} revision={messageRevision} run={run} notify={notify} onConnect={() => setView('connect')} />}
+        : <Workspace key={state.localAccount?.id || 'empty'} state={state} group={selectedGroup} select={setSelected} revision={messageRevision} run={run} notify={notify} onConnect={() => setView('connect')} />}
       <footer className={s.statusbar}><span><span className={`${s.statusDot} ${online ? s.liveDot : ''}`} />{state.detail}</span><span>{number.format(state.archived)} 条已归档{state.lastEventAt && ` · 最近消息 ${time(state.lastEventAt)}`}</span></footer>
     </main>
     {toast && <div className={s.toast} role="alert"><span>{toast}</span><IconButton label="关闭提示" onClick={() => setToast('')}><X size={16} /></IconButton></div>}
@@ -131,13 +135,13 @@ function Connection({ state, run, onMessages }: { state: AppState; run: (action:
         </div>}
         {state.error && <div className={s.errorBox} role="alert"><CircleHelp size={18} /><span>{state.error}</span></div>}
         <div className={s.connectActions}>
-          {active ? <button type="button" className={s.secondaryButton} onClick={() => void run(() => bridge.request({ type: 'disconnect' }))}><Square size={15} />停止连接</button> : <button type="submit" className={s.primaryButton} disabled={busy || (mode === 'managed' && !state.qq)}><Plug size={17} />{state.phase === 'error' ? '重新连接' : '连接 QQ'}<ArrowRight size={16} /></button>}
+          {active ? <button type="button" className={s.secondaryButton} disabled={state.phase === 'stopping'} onClick={() => void run(() => bridge.request({ type: 'disconnect' }))}><Square size={15} />{state.phase === 'stopping' ? '正在停止' : '停止连接'}</button> : <button type="submit" className={s.primaryButton} disabled={busy || (mode === 'managed' && !state.qq)}><Plug size={17} />{state.phase === 'error' ? '重新连接' : '连接 QQ'}<ArrowRight size={16} /></button>}
           {online && <button type="button" className={s.primaryButton} onClick={onMessages}>查看群聊 <ArrowRight size={16} /></button>}
         </div>
       </form>
       <div className={s.authorization}>
         <div className={s.authHeading}><span className={s.stepNumber}>{online ? <Check size={16} /> : '02'}</span><h2>{online ? '账号已连接' : 'QQ 登录确认'}</h2></div>
-        {online && state.account ? <div className={s.accountSuccess}><Avatar name={state.account.nickname} id={state.account.id} size="large" /><h3>{state.account.nickname}</h3><p>{state.account.id}</p><span className={s.successLabel}><ShieldCheck size={16} /> 登录成功</span><div className={s.accountNumbers}><span><strong>{state.groups.length}</strong>群聊</span><span><strong>{state.groups.filter(g => g.followed).length}</strong>已关注</span></div></div> : <>
+        {online && state.account ? <div className={s.accountSuccess}><Avatar key={state.account.id} name={accountName(state.account)} id={state.account.id} size="large" /><h3>{accountName(state.account)}</h3><p>{state.account.id}</p><span className={s.successLabel}><ShieldCheck size={16} /> 登录成功</span><div className={s.accountNumbers}><span><strong>{state.groups.length}</strong>群聊</span><span><strong>{state.groups.filter(g => g.followed).length}</strong>已关注</span></div></div> : <>
           <div className={`${s.qrFrame} ${qrImage ? s.qrReady : ''}`}>
             {qrImage ? <img src={qrImage} width={224} height={224} alt="QQ 登录二维码" /> : <div className={s.qrPlaceholder}>{busy ? <LoaderCircle size={36} className={s.spin} /> : <QrCode size={54} strokeWidth={1} />}<span>{busy ? '正在准备登录' : '等待连接'}</span></div>}
           </div>
