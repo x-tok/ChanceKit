@@ -18,6 +18,7 @@ npm run test:e2e
 | `tests/component.test.ts` | 离线组件安装、摘要校验、残缺组件修复与配置保留 |
 | `tests/profile.test.ts` | 旧目录迁移、SQLite WAL 与登录文件保留、已有目录不覆盖 |
 | `tests/runtime-files.test.ts` | 运行副本替换、失败回滚、中断恢复、清理错误处理 |
+| `tests/release.test.mjs` | 版本一致、拒绝重复发布、拒绝缺失或额外附件、上传失败或摘要不符时保持草稿 |
 | `tests/e2e/desktop.spec.ts` | 独立 Electron 窗口中的模拟扫码、群列表、历史与实时消息、搜索、断线重连、账号显示和窗口尺寸 |
 | `tests/e2e/runtime-files.spec.ts` | 真实 Electron utilityProcess 中含有效 ASAR 文件的目录清理与替换 |
 
@@ -53,9 +54,15 @@ Electron 会把 ASAR 当作虚拟目录。运行目录管理使用 `original-fs`
 
 当前自动测试不操作真实 QQ。未来确需平台实测时，应先取得账号持有人同意，使用专门测试环境，并记录系统与软件版本、步骤、预期与实际结果。不要用心跳代替真实消息入库证据，也不要将一次成功登录等同于全量历史或离线缺口补齐。
 
+## 发布流程验证
+
+手动发布工作流在 macOS arm64、macOS x64 和 Windows x64 执行构建、模拟测试和打包，再校验包内入口与 NapCat 摘要。最终发布任务核对五个安装包和 GitHub 上传摘要，全部通过后公开 Release。该流程仅通过 `workflow_dispatch` 触发，详见[发布说明](releases.md)。
+
+本地的发布逻辑测试使用模拟 GitHub API，不创建真实 Release。工作流配置和本地测试通过不等于 GitHub 三个平台已运行成功；首次手动运行及下载后的干净机器安装仍需验收。正式签名与公证暂不在本轮范围内。
+
 ## 尚未覆盖的能力
 
 - 全量历史自动导入、长时间离线缺口补齐和完整断点回溯。
 - 附件永久归档、复杂转发完整解析和 LLM 信息抽取。
 - 官方 QQ 原资料库与 macOS 独立采集资料库的双向同步。
-- 生产签名、公证和正式安装包发布。
+- 生产签名、公证和各平台干净机器安装验收。

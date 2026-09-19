@@ -34,7 +34,9 @@
 
 请先自行安装[官方 QQ](https://im.qq.com/)。macOS 首次准备运行副本需要额外约 1 GB 空间，聊天记录和附件引用也会占用空间。
 
-项目目前没有在此 README 中提供正式安装包下载地址。开发者可按下文构建；普通用户收到安装包后，通过 GUI 完成配置，不需要 Node.js、终端或手动编辑配置文件。
+安装包发布后可从 [GitHub Releases](https://github.com/x-tok/ChanceKit/releases) 下载。Apple Silicon 选择 `mac-arm64.dmg`，Intel Mac 选择 `mac-x64.dmg`，Windows 10/11 选择 `win-x64.exe`；完整文件名带有版本号。普通用户通过 GUI 完成配置，不需要 Node.js、终端或手动编辑配置文件。
+
+当前 macOS 安装包没有 Developer ID 正式签名和 Apple 公证。将见机拖入“应用程序”后尝试打开；如被系统阻止，可前往“系统设置 → 隐私与安全性”，找到见机的阻止提示并点击“仍要打开”。不同系统版本的按钮文字可能不同，详见[安装与发布说明](docs/releases.md)。
 
 ### 使用流程
 
@@ -145,7 +147,13 @@ npm test
 npm run test:e2e
 ```
 
-输出位于 `dist/`、`dist-electron/`、`release/`。macOS 配置为 DMG/ZIP，Windows 为 NSIS 安装器。当前未配置正式代码签名、公证或自动发布流程。
+输出位于 `dist/`、`dist-electron/`、`release/`。macOS 配置为 DMG/ZIP，Windows 为 NSIS 安装器。当前未配置正式代码签名和公证。
+
+### GitHub 手动发布
+
+打开 [Actions → Release ChanceKit](https://github.com/x-tok/ChanceKit/actions/workflows/release.yml)，点击 **Run workflow**，选择 `main` 后运行。版本号读取所选提交的 `package.json`，默认勾选预览版；工作流会构建 macOS arm64/x64 和 Windows x64 安装包，内置 NapCat，并在检查通过后创建 `v版本号` 的 Release。
+
+**普通 push、推送 tag 和 Pull Request 都不会触发发布。** 不需要提前创建 tag、上传安装包或配置签名证书。新版本发布前应同步更新 `package.json` 与 `package-lock.json` 的版本并推送；已有版本不会被覆盖。步骤、失败重试和平台验证边界见[发布说明](docs/releases.md)。
 
 自动测试只连接本机 NapCat 协议模拟服务，使用合成账号和消息。不要把测试数据目录改成正在使用的资料目录，也不要用主账号反复登录代替自动测试。更多规则见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
@@ -159,6 +167,7 @@ electron/worker.ts      utilityProcess 后台服务入口
 electron/core/         OneBot、NapCat、运行管理、业务服务和 SQLite
 resources/napcat/      固定组件清单与来源说明
 scripts/               开发、构建、组件准备与打包校验
+.github/workflows/     仅手动触发的跨平台发布流程
 tests/                 协议、存储、迁移和 Electron 测试
 docs/                  接入细节与验证范围
 DESIGN.md               界面设计约定
