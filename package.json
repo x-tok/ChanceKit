@@ -13,7 +13,7 @@
     "dev:web": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build && node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
     "test:e2e": "playwright test",
     "start": "electron .",
     "package": "npm run build && electron-builder --dir",
@@ -47,6 +47,7 @@
   "build": {
     "appId": "app.chancekit",
     "productName": "见机",
+    "artifactName": "ChanceKit-${version}-${os}-${arch}.${ext}",
     "directories": { "output": "release" },
     "files": ["dist/**", "dist-electron/**", "package.json"],
     "extraResources": [{ "from": "resources/napcat", "to": "napcat", "filter": ["NapCat.Shell.zip", "manifest.json", "NOTICE.md"] }],
