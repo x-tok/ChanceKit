@@ -12,5 +12,16 @@ const bridge: DesktopBridge = {
   exportMessages: (groupId: string) => ipcRenderer.invoke('chancekit:export', groupId),
   openExternal: (url: string) => ipcRenderer.invoke('chancekit:open', url),
   savedConnection: () => ipcRenderer.invoke('chancekit:connection'),
+  modelCatalog: () => ipcRenderer.invoke('chancekit:models:catalog'),
+  modelSettings: () => ipcRenderer.invoke('chancekit:models:get'),
+  saveModelSettings: input => ipcRenderer.invoke('chancekit:models:save', input),
+  clearModelSettings: () => ipcRenderer.invoke('chancekit:models:clear'),
+  testModelSettings: input => ipcRenderer.invoke('chancekit:models:test', input),
+  cancelModelTest: () => ipcRenderer.invoke('chancekit:models:cancel-test'),
+  schedule: query => ipcRenderer.invoke('chancekit:schedule:list', query),
+  activity: id => ipcRenderer.invoke('chancekit:schedule:detail', id),
+  processingStatus: () => ipcRenderer.invoke('chancekit:schedule:status'),
+  configureProcessing: value => ipcRenderer.invoke('chancekit:schedule:configure', value),
+  retryProcessing: key => ipcRenderer.invoke('chancekit:schedule:retry', key),
 };
 contextBridge.exposeInMainWorld('desktop', bridge);

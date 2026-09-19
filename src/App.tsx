@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, Check, CheckCheck, ChevronDown, ChevronUp, CircleHelp, Copy, Download, ExternalLink, FileText, FolderOpen, Hash, ImageOff, Link2, LoaderCircle, MessageCircle, Monitor, Plug, QrCode, RefreshCw, Search, ShieldCheck, Square, Star, Unplug, Users, Wifi, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, Bot, CalendarDays, Check, CheckCheck, ChevronDown, ChevronUp, CircleHelp, Copy, Download, ExternalLink, FileText, FolderOpen, Hash, ImageOff, Link2, LoaderCircle, MessageCircle, Monitor, Plug, QrCode, RefreshCw, Search, ShieldCheck, Square, Star, Unplug, Users, Wifi, X } from 'lucide-react';
 import QRCode from 'qrcode';
 import type { Account, AppState, ConnectionConfig, Group, HistoryResult, Message, MessagePage, QQInstallation, Segment } from './shared';
 import { bridge, isDesktop } from './bridge';
 import { BRAND } from './brand';
+import { ModelConfiguration } from './ModelConfiguration';
+import { Schedule } from './SchedulePage';
 import s from './App.module.css';
 
 const initialState: AppState = { phase: 'idle', detail: '尚未连接 QQ', runtime: null, groups: [], archived: 0, historyBusy: false, logs: [] };
@@ -27,7 +29,8 @@ function Avatar({ name, id, size = 'normal' }: { name: string; id?: string; size
 
 export function App() {
   const [state, setState] = useState<AppState>(initialState);
-  const [view, setView] = useState<'connect' | 'messages'>('connect');
+  const [view, setView] = useState<'connect' | 'messages' | 'models' | 'schedule'>('connect');
+  const [modelsOpened, setModelsOpened] = useState(false);
   const [selected, setSelected] = useState('');
   const [toast, setToast] = useState('');
   const [messageRevision, setMessageRevision] = useState(0);
@@ -40,7 +43,7 @@ export function App() {
     if (isDesktop) void bridge.request<AppState>({ type: 'state' }).then(setState).catch(error => notify(messageError(error)));
     return bridge.subscribe(event => {
       if (event.type === 'state') setState(event.state);
-      else setMessageRevision(value => value + 1);
+      else if (event.type === 'messages') setMessageRevision(value => value + 1);
     });
   }, [notify]);
   useEffect(() => {
@@ -57,8 +60,10 @@ export function App() {
         <p className={s.brandSubtitle}>{BRAND.subtitle}</p>
       </div>
       <nav aria-label="主导航">
+        <button className={view === 'schedule' ? s.navActive : ''} aria-current={view === 'schedule' ? 'page' : undefined} onClick={() => setView('schedule')}><CalendarDays size={18} /><span>日程</span></button>
         <button className={view === 'messages' ? s.navActive : ''} onClick={() => setView('messages')}><MessageCircle size={18} /><span>群消息</span>{state.groups.filter(g => g.followed).length > 0 && <small>{state.groups.filter(g => g.followed).length}</small>}</button>
         <button className={view === 'connect' ? s.navActive : ''} onClick={() => setView('connect')}><Plug size={18} /><span>连接 QQ</span></button>
+        <button className={view === 'models' ? s.navActive : ''} aria-current={view === 'models' ? 'page' : undefined} onClick={() => { setModelsOpened(true); setView('models'); }}><Bot size={18} /><span>模型配置</span></button>
       </nav>
       <div className={s.navBottom}>
         <span className={s.localLabel}><ShieldCheck size={15} /> 本地消息库</span>
@@ -67,11 +72,13 @@ export function App() {
     </aside>
     <main id="main-content" className={s.main}>
       <header className={s.topbar}>
-        <div className={s.breadcrumb}>工作空间 <span>/</span> <strong>{view === 'connect' ? '连接 QQ' : '群消息'}</strong></div>
+        <div className={s.breadcrumb}>工作空间 <span>/</span> <strong>{view === 'connect' ? '连接 QQ' : view === 'models' ? '模型配置' : view === 'schedule' ? '日程' : '群消息'}</strong></div>
         <div className={s.topbarRight}>{!isDesktop && <span className={s.previewBadge}>浏览器预览</span>}<span className={`${s.connectionStatus} ${online ? s.connected : ''}`}><span />{phases[state.phase]}</span></div>
       </header>
       {view === 'connect' ? <Connection state={state} run={run} onMessages={() => setView('messages')} />
-        : <Workspace key={state.localAccount?.id || 'empty'} state={state} group={selectedGroup} select={setSelected} revision={messageRevision} run={run} notify={notify} onConnect={() => setView('connect')} />}
+        : view === 'messages' ? <Workspace key={state.localAccount?.id || 'empty'} state={state} group={selectedGroup} select={setSelected} revision={messageRevision} run={run} notify={notify} onConnect={() => setView('connect')} /> : null}
+      {modelsOpened && <ModelConfiguration active={view === 'models'} />}
+      {view === 'schedule' && <Schedule state={state} onModels={() => { setModelsOpened(true); setView('models'); }} onGroup={id => { setSelected(id); setView('messages'); }} />}
       <footer className={s.statusbar}><span><span className={`${s.statusDot} ${online ? s.liveDot : ''}`} />{state.detail}</span><span>{number.format(state.archived)} 条已归档{state.lastEventAt && ` · 最近消息 ${time(state.lastEventAt)}`}</span></footer>
     </main>
     {toast && <div className={s.toast} role="alert"><span>{toast}</span><IconButton label="关闭提示" onClick={() => setToast('')}><X size={16} /></IconButton></div>}

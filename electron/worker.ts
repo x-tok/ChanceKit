@@ -12,7 +12,7 @@ const service = new AppService(root, new Store(path.join(root, 'messages.sqlite'
 process.parentPort.on('message', async ({ data }: { data: any }) => {
   if (data.type === 'shutdown') { await service.close(); process.exit(0); }
   try {
-    const value = await service.request(data.command);
+    const value = data.command?.type === 'resolveAttachment' ? await service.resolveAttachment(data.command) : await service.request(data.command);
     process.parentPort.postMessage({ id: data.id, value });
   } catch (error) { process.parentPort.postMessage({ id: data.id, error: errorText(error) }); }
 });

@@ -73,6 +73,61 @@ test('Plain remote endpoints and credentials in URLs are rejected', () => {
   assert.throws(() => validateEndpoint('ws://localhost?token=secret', 'ws'));
 });
 
+test('attachment resolution is limited to archived followed messages for the live account and cancels stale replies', async () => {
+  const fixture = await mockNapCat();
+  const store = new Store(':memory:');
+  const service = new AppService(os.tmpdir(), store, () => {});
+  try {
+    await service.request({ type: 'connect', config: fixture.config });
+    await service.request({ type: 'follow', groupId: '731234567', followed: true });
+    const fileId = '/12345678-abcd-1234-abcd-123456789012';
+    const raw = { ...sample(99, ''), message: [{ type: 'file', data: { file: 'notice.docx', file_id: fileId } }, { type: 'image', data: { file: 'opaque-image-id' } }] };
+    const message = normalizeMessage(raw, '100010001');
+    store.put([message, normalizeMessage(raw, '100010002')]);
+    const request = { type: 'resolveAttachment' as const, accountId: '100010001', messageKey: message.key, segmentIndex: 0 };
+    assert.equal(await service.resolveAttachment(request), 'https://example.com/notice.docx');
+    assert.deepEqual(fixture.calls.find(call => call.action === 'get_group_file_url')!.params, { group_id: '731234567', file_id: fileId });
+    assert.equal(await service.resolveAttachment({ ...request, segmentIndex: 1 }), 'https://example.com/refreshed.png');
+    await assert.rejects(service.request(request as any), /Invalid/);
+    await assert.rejects(service.resolveAttachment({ ...request, accountId: '100010002' }), /所属/);
+    await assert.rejects(service.resolveAttachment({ ...request, segmentIndex: -1 }), /附件/);
+    await service.request({ type: 'follow', groupId: '731234567', followed: false });
+    await assert.rejects(service.resolveAttachment(request), /关注群/);
+    await service.request({ type: 'follow', groupId: '731234567', followed: true });
+    const held = fixture.holdNext('get_group_file_url');
+    const pending = service.resolveAttachment(request);
+    await held.requested;
+    await service.request({ type: 'follow', groupId: '731234567', followed: false });
+    held.release();
+    await assert.rejects(pending, /已变化/);
+    await service.disconnect();
+    await assert.rejects(service.resolveAttachment(request), /所属/);
+  } finally { await service.close(); await fixture.close(); }
+});
+
+test('attachment refresh verifies the source message, supports Base64 and never opens remote local paths', async () => {
+  const fixture = await mockNapCat();
+  const store = new Store(':memory:');
+  const service = new AppService(os.tmpdir(), store, () => {});
+  try {
+    await service.request({ type: 'connect', config: fixture.config });
+    await service.request({ type: 'follow', groupId: '731234567', followed: true });
+    const raw = { ...sample(99, ''), message: [{ type: 'image', data: { file: 'old-image.png' } }] };
+    const archived = normalizeMessage(raw, '100010001');
+    store.put([archived]);
+    const request = { type: 'resolveAttachment' as const, accountId: archived.accountId, messageKey: archived.key, segmentIndex: 0 };
+    fixture.respond('get_image', () => ({ file: '/etc/passwd', url: '/etc/passwd' }));
+    fixture.respond('get_msg', () => ({ ...raw, message: [{ type: 'image', data: { file: 'fresh-id', url: 'https://example.com/fresh.png' } }] }));
+    assert.equal(await service.resolveAttachment(request), 'https://example.com/fresh.png');
+    fixture.respond('get_msg', () => ({ ...raw, group_id: 42 }));
+    await assert.rejects(service.resolveAttachment(request), /不一致/);
+    fixture.respond('get_image', () => ({ base64: Buffer.from('attachment bytes').toString('base64'), file: '/etc/passwd' }));
+    const resolved = await service.resolveAttachment(request);
+    assert.ok(typeof resolved !== 'string' && resolved.bytes);
+    assert.equal(Buffer.from(resolved.bytes!).toString(), 'attachment bytes');
+  } finally { await service.close(); await fixture.close(); }
+});
+
 test('An invalid access token stays failed until the user retries', async () => {
   const fixture = await mockNapCat();
   const service = new AppService(os.tmpdir(), new Store(':memory:'), () => {});

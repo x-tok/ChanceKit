@@ -9,6 +9,8 @@ import { Store, normalizeMessage } from './store';
 import { OneBot, OneBotActionError } from './onebot';
 import { NapCatManagement } from './management';
 import { RuntimeManager, detectQQ } from './runtime';
+import type { AttachmentRequest, ResolvedAttachment } from './material-document';
+import { readManagedAttachment } from './attachment-file';
 
 export class AppService {
   readonly state: AppState = { phase: 'idle', detail: '尚未连接 QQ', groups: [], runtime: null, archived: 0, logs: [], historyBusy: false };
@@ -50,6 +52,71 @@ export class AppService {
   }
   private requireGroup(id: string) {
     if (!this.state.groups.some(group => group.id === id)) throw new Error('当前账号没有这个群聊。');
+  }
+
+  async resolveAttachment(input: AttachmentRequest): Promise<ResolvedAttachment> {
+    const bot = this.bot;
+    const generation = this.generation;
+    if (!bot || this.state.phase !== 'online' || input.accountId !== this.state.account?.id) throw new Error('请连接该消息所属的 QQ 账号后重试附件。');
+    const message = this.store.message(input.accountId, input.messageKey);
+    const followed = () => Boolean(message && this.state.groups.some(group => group.id === message.groupId && group.followed));
+    if (!followed() || !Number.isSafeInteger(input.segmentIndex) || input.segmentIndex < 0) throw new Error('附件不属于当前关注群消息。');
+    const segment = message!.segments[input.segmentIndex];
+    if (!segment || !['file', 'image'].includes(segment.type)) throw new Error('此消息片段不是附件。');
+    const maxSize = segment.type === 'image' ? 20 : 5;
+    if (Number(segment.data.file_size) > maxSize * 1024 * 1024) throw new Error(`附件超过 ${maxSize} MB 读取上限。`);
+    const current = () => {
+      if (generation !== this.generation || this.bot !== bot || this.state.account?.id !== input.accountId || !followed()) throw new Error('连接或关注状态已变化，附件读取已取消。');
+    };
+    const validId = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 2048
+      && (!/^(?:[a-z]+:|\/|\\)/i.test(value) || /^\/?[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value));
+    const readResponse = async (value: any): Promise<ResolvedAttachment | undefined> => {
+      current();
+      if (typeof value?.base64 === 'string') {
+        if (value.base64.length > Math.ceil(maxSize * 1024 * 1024 * 4 / 3) + 8 || !/^[a-z0-9+/]*={0,2}$/i.test(value.base64)) throw new Error('附件数据超过读取上限或编码无效。');
+        return { bytes: Buffer.from(value.base64, 'base64') };
+      }
+      if (typeof value?.url === 'string' && /^https?:\/\//i.test(value.url)) return value.url;
+      if (typeof value?.file === 'string' && path.isAbsolute(value.file) && this.state.runtime === 'managed') {
+        const bytes = await readManagedAttachment(value.file, path.join(this.root, 'runtime', 'qq-profile'),
+          segment.type === 'file' ? String(segment.data.file ?? '') : '', maxSize * 1024 * 1024);
+        current(); return { bytes };
+      }
+    };
+    const resolveId = async (id: unknown): Promise<ResolvedAttachment | undefined> => {
+      if (!validId(id)) return;
+      current();
+      const action = segment.type === 'file' ? 'get_group_file_url' : 'get_image';
+      try {
+        const value = await bot.call(action, segment.type === 'file' ? { group_id: message!.groupId, file_id: id } : { file: id });
+        const resolved = await readResponse(value);
+        if (resolved) return resolved;
+      } catch { current(); }
+      if (segment.type === 'file') {
+        try {
+          const resolved = await readResponse(await bot.call('get_file', { file_id: id }));
+          if (resolved) return resolved;
+        } catch { current(); }
+      }
+    };
+    const originalId = segment.type === 'image' ? segment.data.file_id ?? segment.data.file : segment.data.file_id;
+    const original = await resolveId(originalId);
+    if (original) return original;
+    // NapCat can refresh stale URLs and legacy UUID IDs from the actual archived message.
+    let refreshed: any;
+    try { refreshed = await bot.call('get_msg', { message_id: message!.externalId }); }
+    catch { current(); throw new Error('QQ 无法获取这条原消息的附件，请重新获取该群消息记录后重试。'); }
+    current();
+    if (String(refreshed?.group_id) !== message!.groupId || String(refreshed?.sender?.user_id) !== message!.senderId
+      || Number(refreshed?.time) !== message!.time || !Array.isArray(refreshed.message)) throw new Error('QQ 返回的消息与归档来源不一致，附件读取已取消。');
+    const candidate = refreshed.message[input.segmentIndex];
+    if (candidate?.type !== segment.type) throw new Error('QQ 返回的附件位置与原消息不一致。');
+    if (segment.type === 'image' && typeof candidate.data?.url === 'string' && /^https?:\/\//i.test(candidate.data.url)) return candidate.data.url;
+    if (segment.type === 'file' && String(candidate.data?.file ?? candidate.data?.name) !== String(segment.data.file ?? segment.data.name)) throw new Error('QQ 返回的文件名与原消息不一致。');
+    const freshId = segment.type === 'image' ? candidate.data?.file_id ?? candidate.data?.file : candidate.data?.file_id;
+    const resolved = await resolveId(freshId);
+    if (resolved) return resolved;
+    throw new Error('QQ 未返回可下载的附件；外接 NapCat 需提供下载链接或 Base64，不能直接读取远端文件路径。');
   }
 
   async request(input: Command): Promise<unknown> {
