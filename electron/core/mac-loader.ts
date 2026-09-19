@@ -1,4 +1,6 @@
 export const macQuitCommand = 'chancekit:quit';
+// QQNT aborts during native teardown in Chromium's unsupported single-process mode.
+export const macLaunchArgs = ['--disable-gpu'];
 
 export const macLoader = `const fs = require('node:fs');
 const os = require('node:os');

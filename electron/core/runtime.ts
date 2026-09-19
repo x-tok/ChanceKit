@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { installBundledNapCat } from './component';
-import { macLoader, macQuitCommand } from './mac-loader';
+import { macLoader, macQuitCommand, macLaunchArgs } from './mac-loader';
 import { OneBot } from './onebot';
 import { runtimeFiles, runtimePathExists, discardRuntimePath, recoverRuntimeDirectory, replaceRuntimeDirectory } from './runtime-files';
 import type { ConnectionConfig, QQInstallation } from '../../src/shared';
@@ -123,7 +123,7 @@ export class RuntimeManager {
       let args: string[];
       if (process.platform === 'darwin') {
         executable = await this.prepareMac(installation, signal);
-        args = ['--single-process', '--disable-gpu'];
+        args = [...macLaunchArgs];
       } else {
         const pkg = await windowsPackage(installation.path);
         const patch = { ...await readJSON(pkg), main: './loadNapCat.js' };
@@ -167,6 +167,7 @@ export class RuntimeManager {
     }));
     const packageData = await readFile(path.join(qq.path, 'Contents/Resources/app/package.json'));
     const identity = JSON.stringify({ path: qq.path, version: qq.version, architecture: qq.architecture, source,
+      signing: 'deep', launchArgs: macLaunchArgs,
       packageHash: createHash('sha256').update(packageData).digest('hex'),
       loaderHash: createHash('sha256').update(macLoader).update(macEntitlements).digest('hex') });
     await recoverRuntimeDirectory(bundle);
@@ -175,7 +176,7 @@ export class RuntimeManager {
       if (await readFile(path.join(bundle, markerPath), 'utf8') === identity &&
           (await readJSON(path.join(bundle, 'Contents/Resources/app/package.json'))).main === './chancekit-loader.cjs' &&
           await readFile(path.join(bundle, 'Contents/Resources/app/chancekit-loader.cjs'), 'utf8') === macLoader && await exists(executable)) {
-        await exec('/usr/bin/codesign', ['--verify', bundle], { signal });
+        await exec('/usr/bin/codesign', ['--verify', '--deep', bundle], { signal });
         await discardRuntimePath(`${bundle}.previous`, this.report);
         return executable;
       }
@@ -197,8 +198,9 @@ export class RuntimeManager {
       const entitlements = path.join(workspace, 'entitlements.plist');
       await writeFile(entitlements, macEntitlements);
       this.report('正在签名独立 QQ 运行副本');
-      await exec('/usr/bin/codesign', ['--force', '--sign', '-', '--entitlements', entitlements, staging], { signal, timeout: 90_000 });
-      await exec('/usr/bin/codesign', ['--verify', staging], { signal });
+      // Helpers and QQNT must share the copy's ad-hoc signature in multi-process mode.
+      await exec('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', '--entitlements', entitlements, staging], { signal, timeout: 90_000 });
+      await exec('/usr/bin/codesign', ['--verify', '--deep', staging], { signal });
       signal.throwIfAborted();
       await replaceRuntimeDirectory(staging, bundle, this.report);
       await discardRuntimePath(path.join(this.root, 'qq-runtime.json'), this.report);

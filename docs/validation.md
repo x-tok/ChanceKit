@@ -23,6 +23,8 @@ npm run test:e2e
 | `tests/e2e/desktop.spec.ts` | 独立 Electron 窗口中的模拟扫码、群列表、历史与实时消息、搜索、断线重连、账号显示和窗口尺寸 |
 | `tests/e2e/runtime-files.spec.ts` | 真实 Electron utilityProcess 中含有效 ASAR 文件的目录清理与替换 |
 | `tests/e2e/qq-exit.spec.ts` | 真实 Electron 加载 macOS 运行入口后，通过私有 stdin 管道正常退出，不加载 QQ 或真实登录资料 |
+| `tests/e2e/quit.spec.ts` | macOS 系统退出事件（与 Dock 退出相同）经过真实主程序，等待后台服务及模拟 QQ 进程清理；覆盖重复退出 |
+| `tests/native/mac-qq-exit.test.ts` | 可选：临时复制官方 QQ，使用真实 QQNT 运行库验证管道与模拟 OneBot 退出码及辅助进程清理；不登录 QQ |
 
 Electron 桌面布局覆盖 1240x820、900x820、1240x640、900x640；浏览器预览覆盖 1280、760、375、320px。测试截图与失败 trace 位于 `test-results/`，不提交到 Git。
 
@@ -37,6 +39,18 @@ Electron 会把 ASAR 当作虚拟目录。运行目录管理使用 `original-fs`
 退出测试使用自建的子进程和模拟 OneBot 服务。NapCat `bot_exit` 会直接退出、可能来不及回复，因此以进程退出事件确认结果；WebSocket 断开不代表进程已经结束。macOS 的启动入口在登录前就接收私有管道退出指令，不依靠 JavaScript 的 `SIGTERM` 监听覆盖 Electron 原生处理。主程序等待后台清理完成，重复退出请求不能提前跳过等待。
 
 这些测试验证退出指令和等待顺序，不替代特定 QQ 版本的实机验收；验证期间不自动操作真实 QQ 账号。外接 NapCat 的断开测试同时检查服务仍可接受新连接。
+
+#### macOS QQNT 退出回归
+
+标准 Electron 的退出测试无法覆盖 QQ 自带 QQNT 运行库的差异。QQ `6.9.89-45758` 在 `--single-process` 下，即使入口为空白脚本、未登录且未加载 NapCat，`process.exit(0)` 和 `app.quit()` 仍会在原生清理阶段触发 `SIGABRT`。去掉该参数并对副本内的框架与辅助进程一并签名后，管道退出和模拟 `bot_exit` 均返回退出码 0，辅助进程也结束。
+
+已在 Apple Silicon 上执行原生回归的红绿对照：修复前测试因 `SIGABRT` 失败，修复后通过。测试仅修改临时副本，使用空白资料目录和合成 WebSocket 服务，不导入 NapCat、不进行真实账号登录。可显式执行：
+
+```sh
+CHANCEKIT_TEST_QQ_APP=/Applications/QQ.app npm run test:native:qq
+```
+
+未指定路径或不在 macOS 上时跳过，发布 CI 不依赖安装官方 QQ。该测试不证明登录后的消息完整性，也不替代其他 QQ 版本、Intel Mac 和 Windows 的验收。
 
 ### 账号显示
 

@@ -1,7 +1,7 @@
 {
   "name": "chancekit",
   "productName": "见机",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ChanceKit - 不让机会淹没在消息里",
   "private": true,
   "type": "module",
@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
     "test:e2e": "playwright test",
+    "test:native:qq": "tsx --test tests/native/*.test.ts",
     "start": "electron .",
     "package": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder"
