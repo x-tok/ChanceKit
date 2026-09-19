@@ -1,0 +1,302 @@
+import { mkdir } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import path from 'node:path';
+import { once } from 'node:events';
+import { finished } from 'node:stream/promises';
+import type { AppState, AppEvent, Command, ConnectionConfig, HistoryResult, Account } from '../../src/shared';
+import { commandSchema, errorText, validateEndpoint } from './validation';
+import { Store, normalizeMessage } from './store';
+import { OneBot, OneBotActionError } from './onebot';
+import { NapCatManagement } from './management';
+import { RuntimeManager, detectQQ } from './runtime';
+
+export class AppService {
+  readonly state: AppState = { phase: 'idle', detail: '尚未连接 QQ', groups: [], runtime: null, archived: 0, logs: [], historyBusy: false };
+  private bot?: OneBot;
+  private management?: NapCatManagement;
+  private config?: ConnectionConfig;
+  private timer?: NodeJS.Timeout;
+  private generation = 0;
+  private cursors = new Map<string, string>();
+  private runtime: RuntimeManager;
+  private connectionBusy = false;
+  private historyGeneration = 0;
+
+  constructor(private root: string, private store: Store, private emit: (event: AppEvent) => void, componentArchive = '') {
+    this.runtime = new RuntimeManager(path.join(root, 'runtime'), text => { this.patch({ detail: text }); this.log(text); }, text => {
+      this.generation++;
+      clearTimeout(this.timer);
+      this.bot?.close(); this.bot = undefined;
+      this.patch({ phase: 'error', error: text, detail: '连接组件已停止', qr: undefined });
+      this.log(text);
+    }, componentArchive);
+    this.state.account = store.lastAccount();
+    this.reloadLocal();
+  }
+
+  private patch(update: Partial<AppState>) { Object.assign(this.state, update); this.emit({ type: 'state', state: this.state }); }
+  private log(text: string) {
+    this.state.logs = [...this.state.logs, { time: Date.now(), text }].slice(-80);
+    this.emit({ type: 'state', state: this.state });
+  }
+  private reloadLocal() {
+    const id = this.state.account?.id;
+    this.patch({ groups: id ? this.store.groups(id) : [], archived: id ? this.store.count(id) : 0 });
+  }
+  private accountId() {
+    if (!this.state.account) throw new Error('尚无已登录账号。');
+    return this.state.account.id;
+  }
+  private requireGroup(id: string) {
+    if (!this.state.groups.some(group => group.id === id)) throw new Error('当前账号没有这个群聊。');
+  }
+
+  async request(input: Command): Promise<unknown> {
+    const command = commandSchema.parse(input);
+    switch (command.type) {
+      case 'state': return this.state;
+      case 'detect': {
+        const qq = await detectQQ(command.path);
+        this.patch({ qq }); return qq ?? null;
+      }
+      case 'start': {
+        if (this.connectionBusy) throw new Error('正在准备连接，请稍候。');
+        this.connectionBusy = true;
+        await this.disconnect();
+        const generation = this.generation;
+        this.patch({ phase: 'preparing', detail: '正在检查官方 QQ', runtime: 'managed', error: undefined });
+        try {
+          const qq = await detectQQ(command.path);
+          if (!qq) throw new Error('没有找到官方 QQ，请先自行下载安装。');
+          this.patch({ qq });
+          const config = await this.runtime.start(qq, this.state.account?.id);
+          if (generation !== this.generation) { await this.runtime.stop(); return; }
+          this.config = config;
+          this.management = new NapCatManagement(config.webuiUrl, config.webuiToken);
+          this.patch({ phase: 'starting', detail: '正在等待 QQ 登录服务' });
+          void this.pollLogin(generation, Date.now() + 120_000);
+        } catch (error) {
+          if (generation === this.generation) { await this.runtime.stop(); this.patch({ phase: 'error', error: errorText(error), detail: '连接未完成' }); }
+          throw error;
+        } finally { this.connectionBusy = false; }
+        return;
+      }
+      case 'connect': {
+        if (this.connectionBusy) throw new Error('正在准备连接，请稍候。');
+        validateEndpoint(command.config.wsUrl, 'ws');
+        if (command.config.webuiUrl) validateEndpoint(command.config.webuiUrl, 'http');
+        this.connectionBusy = true;
+        await this.disconnect();
+        const generation = this.generation;
+        this.config = command.config;
+        this.patch({ runtime: 'external', phase: 'connecting', detail: '正在连接 NapCat', error: undefined });
+        try {
+          if (command.config.webuiUrl) {
+            this.management = new NapCatManagement(command.config.webuiUrl, command.config.webuiToken);
+            const status = await this.management.status();
+            if (generation !== this.generation) return;
+            if (!status.isLogin) {
+              this.patch({ phase: 'qr', detail: '等待 QQ 扫码确认', qr: status.qrcodeurl, error: status.loginError || undefined });
+              void this.pollLogin(generation, Date.now() + 30_000);
+              return;
+            }
+          }
+          await this.openBot(generation);
+        } catch (error) {
+          if (generation === this.generation) this.patch({ phase: 'error', detail: '连接未完成', error: errorText(error) });
+          throw error;
+        } finally { this.connectionBusy = false; }
+        return;
+      }
+      case 'disconnect': await this.disconnect(); return;
+      case 'refreshQR': {
+        if (!this.management) throw new Error('扫码登录需要连接 NapCat 的登录管理服务。');
+        await this.management.refreshQR();
+        this.patch({ error: undefined, qr: undefined, detail: '正在刷新二维码' }); return;
+      }
+      case 'refreshGroups': await this.refreshGroups(); return;
+      case 'follow':
+        this.requireGroup(command.groupId);
+        this.store.follow(this.accountId(), command.groupId, command.followed); this.reloadLocal(); return;
+      case 'history': this.requireGroup(command.groupId); return this.history(command.groupId, command.older);
+      case 'messages': this.requireGroup(command.groupId); return this.store.messages(this.accountId(), command.groupId, command.search, command.offset);
+      case 'export': this.requireGroup(command.groupId); return this.export(command.groupId);
+      case 'forward': {
+        if (!this.bot) throw new Error('请先连接 QQ。');
+        return this.bot.call('get_forward_msg', { message_id: command.id });
+      }
+    }
+  }
+
+  private async pollLogin(generation: number, deadline: number) {
+    if (generation !== this.generation || !this.management) return;
+    try {
+      const status = await this.management.status();
+      if (generation !== this.generation) return;
+      if (status.isLogin) {
+        await this.openBot(generation);
+        return;
+      }
+      this.patch({ phase: 'qr', qr: status.qrcodeurl || undefined, detail: status.isOffline ? 'QQ 已离线，请重新扫码' : '等待 QQ 扫码确认', error: status.loginError || undefined });
+      deadline = Date.now() + 30_000;
+    } catch (error) {
+      if (generation !== this.generation) return;
+      if (Date.now() > deadline) {
+        if (this.state.runtime === 'managed') await this.runtime.stop();
+        this.patch({ phase: 'error', detail: '登录服务未就绪', error: errorText(error) }); return;
+      }
+    }
+    if (generation === this.generation) this.timer = setTimeout(() => { void this.pollLogin(generation, deadline); }, 2500);
+  }
+
+  private async openBot(generation: number) {
+    if (generation !== this.generation || !this.config) return;
+    this.patch({ phase: 'connecting', detail: 'QQ 已登录，正在读取群列表', error: undefined, qr: undefined });
+    const bot = new OneBot();
+    this.bot?.close();
+    this.bot = bot;
+    let ready = false;
+    const buffered: any[] = [];
+    bot.on('event', event => {
+      if (generation !== this.generation || this.bot !== bot) return;
+      if (!ready) { if (buffered.length < 500) buffered.push(event); return; }
+      this.handleEvent(event);
+    });
+    bot.on('disconnected', () => {
+      if (!ready || generation !== this.generation || this.bot !== bot) return;
+      this.cursors.clear();
+      this.patch({ phase: 'reconnecting', detail: '连接中断，正在重连', error: undefined });
+      this.scheduleReconnect(generation);
+    });
+    try {
+      await bot.connect(this.config.wsUrl, this.config.accessToken);
+      const raw = await bot.call('get_login_info');
+      if (generation !== this.generation || this.bot !== bot) { bot.close(); return; }
+      if (!raw?.user_id) throw new Error('QQ 尚未完成登录。');
+      const account: Account = { id: String(raw.user_id), nickname: String(raw.nickname || raw.user_id) };
+      this.store.saveAccount(account);
+      this.patch({ account });
+      this.reloadLocal();
+      await this.refreshGroups();
+      if (generation !== this.generation || this.bot !== bot) return;
+      this.patch({ phase: 'online', detail: 'QQ 已连接，正在接收关注群消息', error: undefined });
+      this.log('QQ 连接成功，群列表已更新');
+      ready = true;
+      for (const event of buffered) this.handleEvent(event);
+      // Only a recent-page reconciliation in v0.1; never label this a complete gap recovery.
+      for (const group of this.state.groups.filter(g => g.followed)) {
+        if (generation !== this.generation) return;
+        await this.history(group.id, false).catch(error => this.log(`最近消息补取未完成：${errorText(error)}`));
+      }
+    } catch (error) {
+      if (generation !== this.generation || this.bot !== bot) return;
+      bot.close(); this.bot = undefined;
+      throw error;
+    }
+  }
+
+  private scheduleReconnect(generation: number) {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(async () => {
+      if (generation !== this.generation) return;
+      try { await this.openBot(generation); }
+      catch (error) {
+        if (generation !== this.generation) return;
+        this.patch({ phase: 'reconnecting', detail: '正在重试连接', error: errorText(error) });
+        this.scheduleReconnect(generation);
+      }
+    }, 3000);
+  }
+
+  private handleEvent(event: any) {
+    if (!this.state.account || String(event.self_id) !== this.state.account.id) return;
+    if (event.meta_event_type === 'heartbeat' && event.status?.online === false) {
+      this.patch({ phase: 'reconnecting', detail: 'QQ 已离线，等待恢复' });
+      this.bot?.close(); this.bot = undefined;
+      if (this.management) void this.pollLogin(this.generation, Date.now() + 30_000);
+      else this.scheduleReconnect(this.generation);
+      return;
+    }
+    if (!['message', 'message_sent'].includes(event.post_type) || event.message_type !== 'group') return;
+    const groupId = String(event.group_id);
+    if (!this.state.groups.some(group => group.id === groupId && group.followed)) return;
+    try {
+      this.store.put([normalizeMessage(event, this.accountId())]);
+      this.patch({ lastEventAt: Date.now() });
+      this.reloadLocal();
+      this.emit({ type: 'messages', groupId });
+    } catch { this.patch({ error: '消息未能写入本地，请检查磁盘空间；恢复后重新获取最近消息。' }); }
+  }
+
+  private async refreshGroups() {
+    if (!this.bot) throw new Error('请先连接 QQ。');
+    const generation = this.generation;
+    const accountId = this.accountId();
+    const groups = await this.bot.call('get_group_list', { no_cache: true });
+    if (generation !== this.generation || accountId !== this.state.account?.id) return;
+    if (!Array.isArray(groups)) throw new Error('群列表响应格式不正确。');
+    this.store.saveGroups(accountId, groups.filter(g => g?.group_id));
+    this.reloadLocal();
+  }
+
+  private async history(groupId: string, older: boolean): Promise<HistoryResult> {
+    if (!this.bot || this.state.phase !== 'online') throw new Error('请先连接 QQ，再获取消息记录。');
+    if (this.state.historyBusy) throw new Error('正在读取消息，请等待当前批次完成。');
+    const cursor = older ? this.cursors.get(groupId) : undefined;
+    if (older && !cursor) throw new Error('连接恢复后需要先刷新最近消息，再继续读取更早记录。');
+    const generation = this.generation;
+    const ticket = ++this.historyGeneration;
+    const accountId = this.accountId();
+    this.patch({ historyBusy: true });
+    try {
+      const result = await this.bot.call('get_group_msg_history', { group_id: groupId, count: 100, reverse_order: Boolean(cursor), ...(cursor ? { message_seq: cursor } : {}) });
+      if (generation !== this.generation) throw new Error('连接已切换，这次读取已取消。');
+      if (!Array.isArray(result?.messages)) throw new Error('消息历史响应格式不正确。');
+      const messages = result.messages.map((raw: any) => normalizeMessage(raw, accountId, groupId));
+      messages.sort((a: any, b: any) => a.time - b.time || (a.realSeq && b.realSeq ? Number(BigInt(a.realSeq) - BigInt(b.realSeq)) : 0));
+      const added = this.store.put(messages);
+      const next = messages[0]?.externalId;
+      const canContinue = Boolean(next && next !== cursor);
+      if (next && (older || !this.cursors.has(groupId))) this.cursors.set(groupId, next);
+      this.reloadLocal();
+      this.emit({ type: 'messages', groupId });
+      this.log(`已读取 ${messages.length} 条群消息，新增 ${added} 条`);
+      return { added, received: messages.length, canContinue, boundary: messages.length === 0 ? 'empty' : canContinue ? 'more' : 'uncertain' };
+    } catch (error) {
+      if (error instanceof OneBotActionError && error.retcode === 1200 && /^消息.*不存在$/.test(error.wording)) {
+        if (!older) this.cursors.delete(groupId);
+        return { added: 0, received: 0, canContinue: false, boundary: older ? 'uncertain' : 'empty' };
+      }
+      throw new Error(`${errorText(error)} 未能确认更早历史的范围。`);
+    } finally { if (ticket === this.historyGeneration) this.patch({ historyBusy: false }); }
+  }
+
+  private async export(groupId: string): Promise<string> {
+    const folder = path.join(this.root, 'exports');
+    await mkdir(folder, { recursive: true, mode: 0o700 });
+    const dest = path.join(folder, 'messages.jsonl');
+    const stream = createWriteStream(dest, { mode: 0o600 });
+    const complete = finished(stream);
+    try {
+      for (const message of this.store.export(this.accountId(), groupId)) {
+        if (!stream.write(`${JSON.stringify(message)}\n`)) await once(stream, 'drain');
+      }
+      stream.end();
+      await complete;
+      return dest;
+    } catch (error) { stream.destroy(); await complete.catch(() => {}); throw error; }
+  }
+
+  async disconnect() {
+    this.generation++;
+    this.historyGeneration++;
+    clearTimeout(this.timer);
+    this.bot?.close(); this.bot = undefined;
+    this.management = undefined;
+    this.config = undefined;
+    this.cursors.clear();
+    await this.runtime.stop();
+    this.patch({ phase: 'idle', detail: '采集已停止，本地记录仍可查看', error: undefined, qr: undefined, historyBusy: false });
+  }
+  async close() { await this.disconnect(); this.store.close(); }
+}

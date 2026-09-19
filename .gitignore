@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+release/
+.cache/
+.dev-data/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+resources/napcat/*.zip
+resources/napcat/*.part

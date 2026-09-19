@@ -1,0 +1,59 @@
+{
+  "name": "qunxun-desktop",
+  "productName": "群讯",
+  "version": "0.1.0",
+  "description": "Local QQ group message workspace",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "prepare:napcat": "node scripts/napcat-bundle.mjs --download",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "start": "electron .",
+    "package": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "extract-zip": "2.0.1",
+    "lucide-react": "^0.468.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "ws": "^8.18.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^24.10.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.1.0",
+    "electron": "44.4.3",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.12",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2"
+  },
+  "build": {
+    "appId": "app.qunxun.desktop",
+    "productName": "群讯",
+    "directories": { "output": "release" },
+    "files": ["dist/**", "dist-electron/**", "package.json"],
+    "extraResources": [{ "from": "resources/napcat", "to": "napcat", "filter": ["NapCat.Shell.zip", "manifest.json", "NOTICE.md"] }],
+    "beforePack": "scripts/before-pack.cjs",
+    "icon": "build/icon.png",
+    "asar": true,
+    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.productivity" },
+    "win": { "target": ["nsis"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}
