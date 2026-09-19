@@ -1,17 +1,20 @@
-import { access, mkdir, readFile, writeFile, rename, rm, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { installBundledNapCat } from './component';
+import { runtimeFiles, runtimePathExists, discardRuntimePath, recoverRuntimeDirectory, replaceRuntimeDirectory } from './runtime-files';
 import type { ConnectionConfig, QQInstallation } from '../../src/shared';
 
 const exec = promisify(execFile);
-const exists = async (p: string) => access(p).then(() => true, () => false);
+const { mkdir, mkdtemp, readFile, writeFile, readdir, stat } = runtimeFiles;
+const exists = runtimePathExists;
 const readJSON = async (p: string) => JSON.parse(await readFile(p, 'utf8'));
 const saveJSON = async (p: string, value: unknown) => writeFile(p, JSON.stringify(value, null, 2), { mode: 0o600 });
+const macLoader = `const fs = require('node:fs');\nconst os = require('node:os');\nconst path = require('node:path');\nconst data = process.env.CHANCEKIT_QQ_DATA;\nif (!data || !process.env.CHANCEKIT_NAPCAT_ENTRY) throw new Error('Launch this runtime from ChanceKit');\nfs.mkdirSync(path.join(data, 'Library/Application Support/QQ'), {recursive:true});\nos.homedir = () => data;\nrequire('node:module').syncBuiltinESMExports();\nrequire('electron').app.setPath('userData', path.join(data, 'electron'));\nimport(require('node:url').pathToFileURL(process.env.CHANCEKIT_NAPCAT_ENTRY).href).catch(e => { console.error(e); process.exit(1); });\n`;
+const macEntitlements = '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/><key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/><key>com.apple.security.cs.disable-library-validation</key><true/><key>com.apple.security.cs.disable-executable-page-protection</key><true/><key>com.apple.security.network.client</key><true/><key>com.apple.security.network.server</key><true/></dict></plist>';
 
 async function windowsPackage(exe: string): Promise<string> {
   const root = path.dirname(exe);
@@ -83,6 +86,10 @@ export class RuntimeManager {
         if (stdout.split('\n').some(line => line.startsWith(path.join(installation.path, 'Contents/MacOS/QQ')))) {
           throw new Error('桌面 QQ 正在运行。请先正常退出 QQ，再点击连接；之后可随时停止采集并重新打开 QQ。');
         }
+        const managedExecutable = path.join(this.root, 'QQRuntime.app/Contents/MacOS/QQ');
+        if (stdout.split('\n').some(line => line === managedExecutable || line.startsWith(`${managedExecutable} `))) {
+          throw new Error('已有 QQ 连接组件正在使用这个副本。请先关闭另一个见机实例，再重新连接。');
+        }
       }
       const component = await installBundledNapCat(this.root, this.componentArchive, this.report, signal);
       const webPort = await freePort();
@@ -101,7 +108,7 @@ export class RuntimeManager {
       let executable: string;
       let args: string[];
       if (process.platform === 'darwin') {
-        executable = await this.prepareMac(installation, component, signal);
+        executable = await this.prepareMac(installation, signal);
         args = ['--single-process', '--disable-gpu'];
       } else {
         const pkg = await windowsPackage(installation.path);
@@ -133,35 +140,55 @@ export class RuntimeManager {
     } finally { this.abort = undefined; }
   }
 
-  private async prepareMac(qq: QQInstallation, component: string, signal: AbortSignal) {
+  private async prepareMac(qq: QQInstallation, signal: AbortSignal) {
     const bundle = path.join(this.root, 'QQRuntime.app');
-    const marker = path.join(this.root, 'qq-runtime.json');
-    const identity = JSON.stringify({ path: qq.path, version: qq.version, architecture: qq.architecture, loader: 2 });
-    if (await exists(marker) && await readFile(marker, 'utf8') === identity && await exists(path.join(bundle, 'Contents/MacOS/QQ'))) return path.join(bundle, 'Contents/MacOS/QQ');
+    const markerPath = 'Contents/Resources/chancekit-runtime.json';
+    const executable = path.join(bundle, 'Contents/MacOS/QQ');
+    const sourceFiles = ['Contents/Info.plist', 'Contents/MacOS/QQ', 'Contents/Resources/app/wrapper.node', 'Contents/Resources/app/application.asar'];
+    const source = await Promise.all(sourceFiles.map(async file => {
+      const info = await stat(path.join(qq.path, file));
+      return { file, size: info.size, modified: info.mtimeMs, inode: info.ino };
+    }));
+    const packageData = await readFile(path.join(qq.path, 'Contents/Resources/app/package.json'));
+    const identity = JSON.stringify({ path: qq.path, version: qq.version, architecture: qq.architecture, source,
+      packageHash: createHash('sha256').update(packageData).digest('hex'),
+      loaderHash: createHash('sha256').update(macLoader).update(macEntitlements).digest('hex') });
+    await recoverRuntimeDirectory(bundle);
+    await discardRuntimePath(path.join(this.root, 'QQRuntime.staging.app'), this.report);
+    try {
+      if (await readFile(path.join(bundle, markerPath), 'utf8') === identity &&
+          (await readJSON(path.join(bundle, 'Contents/Resources/app/package.json'))).main === './chancekit-loader.cjs' &&
+          await readFile(path.join(bundle, 'Contents/Resources/app/chancekit-loader.cjs'), 'utf8') === macLoader && await exists(executable)) {
+        await exec('/usr/bin/codesign', ['--verify', bundle], { signal });
+        await discardRuntimePath(`${bundle}.previous`, this.report);
+        return executable;
+      }
+    } catch { signal.throwIfAborted(); }
     this.report('正在准备独立 QQ 运行副本 · 约需 1 GB 空间');
     await exec('/usr/bin/codesign', ['--verify', qq.path], { signal });
-    const staging = path.join(this.root, 'QQRuntime.staging.app');
-    await rm(staging, { recursive: true, force: true });
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
+    const workspace = await mkdtemp(path.join(this.root, 'qq-runtime-'));
+    const staging = path.join(workspace, 'QQRuntime.app');
     try {
       await exec('/usr/bin/ditto', [qq.path, staging], { signal, timeout: 180_000 });
       const appDir = path.join(staging, 'Contents/Resources/app');
-      const pkg = await readJSON(path.join(appDir, 'package.json'));
+      const pkg = JSON.parse(packageData.toString('utf8'));
       await saveJSON(path.join(appDir, 'package.json'), { ...pkg, main: './chancekit-loader.cjs' });
       // NapCat's macOS data path is derived from os.homedir, not Electron userData.
       // A process-local shim isolates its profile without changing HOME or linking old QQ/QCE stores.
-      const loader = `const fs = require('node:fs');\nconst os = require('node:os');\nconst path = require('node:path');\nconst data = process.env.CHANCEKIT_QQ_DATA;\nif (!data || !process.env.CHANCEKIT_NAPCAT_ENTRY) throw new Error('Launch this runtime from ChanceKit');\nfs.mkdirSync(path.join(data, 'Library/Application Support/QQ'), {recursive:true});\nos.homedir = () => data;\nrequire('node:module').syncBuiltinESMExports();\nrequire('electron').app.setPath('userData', path.join(data, 'electron'));\nimport(require('node:url').pathToFileURL(process.env.CHANCEKIT_NAPCAT_ENTRY).href).catch(e => { console.error(e); process.exit(1); });\n`;
-      await writeFile(path.join(appDir, 'chancekit-loader.cjs'), loader);
-      const entitlements = path.join(this.root, 'runtime-entitlements.plist');
-      await writeFile(entitlements, '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/><key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/><key>com.apple.security.cs.disable-library-validation</key><true/><key>com.apple.security.cs.disable-executable-page-protection</key><true/><key>com.apple.security.network.client</key><true/><key>com.apple.security.network.server</key><true/></dict></plist>');
+      await writeFile(path.join(appDir, 'chancekit-loader.cjs'), macLoader);
+      await writeFile(path.join(staging, markerPath), identity);
+      const entitlements = path.join(workspace, 'entitlements.plist');
+      await writeFile(entitlements, macEntitlements);
       this.report('正在签名独立 QQ 运行副本');
       await exec('/usr/bin/codesign', ['--force', '--sign', '-', '--entitlements', entitlements, staging], { signal, timeout: 90_000 });
       await exec('/usr/bin/codesign', ['--verify', staging], { signal });
       signal.throwIfAborted();
-      await rm(bundle, { recursive: true, force: true });
-      await rename(staging, bundle);
-      await writeFile(marker, identity);
-    } finally { await rm(staging, { recursive: true, force: true }); }
-    return path.join(bundle, 'Contents/MacOS/QQ');
+      await replaceRuntimeDirectory(staging, bundle, this.report);
+      await discardRuntimePath(path.join(this.root, 'qq-runtime.json'), this.report);
+      await discardRuntimePath(path.join(this.root, 'runtime-entitlements.plist'), this.report);
+    } finally { await discardRuntimePath(workspace, this.report); }
+    return executable;
   }
 
   async stop() {

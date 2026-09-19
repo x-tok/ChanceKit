@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, stat, writeFile, copyFile, open } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, stat, writeFile, copyFile, open, rename, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { installBundledNapCat, RELEASE } from '../electron/core/component';
@@ -49,5 +49,27 @@ test('missing and checksum-corrupt bundles fail without network fallback or part
     const canceled = new AbortController();
     canceled.abort();
     await assert.rejects(installBundledNapCat(folder, archive, () => {}, canceled.signal), { name: 'AbortError' });
+  } finally { await rm(folder, { recursive: true, force: true }); }
+});
+
+test('repairing a partial NapCat installation retains local configuration and recovers interrupted replacement', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'chancekit-component-repair-'));
+  const signal = new AbortController().signal;
+  try {
+    const dest = await installBundledNapCat(folder, archive, () => {}, signal);
+    const config = path.join(dest, 'config/local-setting.json');
+    await writeFile(config, '{"fixture":"keep"}');
+    await rm(path.join(dest, 'napcat.mjs'));
+    await mkdir(`${dest}.staging`);
+    await writeFile(path.join(`${dest}.staging`, 'partial'), 'interrupted-copy');
+    await assert.rejects(installBundledNapCat(folder, path.join(folder, 'missing.zip'), () => {}, signal), /重新安装见机/);
+    assert.equal(await readFile(config, 'utf8'), '{"fixture":"keep"}');
+    await installBundledNapCat(folder, archive, () => {}, signal);
+    assert.ok((await stat(path.join(dest, 'napcat.mjs'))).size > 0);
+    assert.equal(await readFile(config, 'utf8'), '{"fixture":"keep"}');
+    await assert.rejects(stat(`${dest}.staging`), { code: 'ENOENT' });
+    await rename(dest, `${dest}.previous`);
+    assert.equal(await installBundledNapCat(folder, path.join(folder, 'missing.zip'), () => {}, signal), dest);
+    assert.equal(await readFile(config, 'utf8'), '{"fixture":"keep"}');
   } finally { await rm(folder, { recursive: true, force: true }); }
 });
