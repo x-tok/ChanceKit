@@ -92,11 +92,11 @@ export class RuntimeManager {
       const configDir = path.join(component, 'config');
       await mkdir(configDir, { recursive: true, mode: 0o700 });
       await saveJSON(path.join(configDir, 'webui.json'), { host: '127.0.0.1', port: webPort, prefix: '', token: config.webuiToken, loginRate: 20, autoLoginAccount: /^\d+$/.test(autoLoginAccount) ? autoLoginAccount : '', accessControlMode: 'none' });
-      const onebot = { network: { websocketServers: [{ name: 'qunxun', enable: true, host: '127.0.0.1', port: wsPort, token: config.accessToken, messagePostFormat: 'array', reportSelfMessage: true, enableForcePushEvent: true, heartInterval: 15000 }] } };
+      const onebot = { network: { websocketServers: [{ name: 'chancekit', enable: true, host: '127.0.0.1', port: wsPort, token: config.accessToken, messagePostFormat: 'array', reportSelfMessage: true, enableForcePushEvent: true, heartInterval: 15000 }] } };
       await saveJSON(path.join(configDir, 'onebot11.json'), onebot);
       // NapCat prefers account-specific files after the first successful login.
       for (const name of await readdir(configDir)) if (/^onebot11_\d+\.json$/.test(name)) await saveJSON(path.join(configDir, name), onebot);
-      const env: NodeJS.ProcessEnv = { ...process.env, NAPCAT_WORKDIR: component, NAPCAT_DISABLE_MULTI_PROCESS: '1', QUNXUN_NAPCAT_ENTRY: path.join(component, 'napcat.mjs'), QUNXUN_QQ_DATA: path.join(this.root, 'qq-profile') };
+      const env: NodeJS.ProcessEnv = { ...process.env, NAPCAT_WORKDIR: component, NAPCAT_DISABLE_MULTI_PROCESS: '1', CHANCEKIT_NAPCAT_ENTRY: path.join(component, 'napcat.mjs'), CHANCEKIT_QQ_DATA: path.join(this.root, 'qq-profile') };
       delete env.ELECTRON_RUN_AS_NODE;
       let executable: string;
       let args: string[];
@@ -107,7 +107,7 @@ export class RuntimeManager {
         const pkg = await windowsPackage(installation.path);
         const patch = { ...await readJSON(pkg), main: './loadNapCat.js' };
         await saveJSON(path.join(component, 'qqnt.json'), patch);
-        await writeFile(path.join(component, 'loadNapCat.js'), `import(require('node:url').pathToFileURL(process.env.QUNXUN_NAPCAT_ENTRY).href).catch(e => { console.error(e); process.exit(1); });\n`);
+        await writeFile(path.join(component, 'loadNapCat.js'), `import(require('node:url').pathToFileURL(process.env.CHANCEKIT_NAPCAT_ENTRY).href).catch(e => { console.error(e); process.exit(1); });\n`);
         Object.assign(env, { NAPCAT_PATCH_PACKAGE: path.join(component, 'qqnt.json'), NAPCAT_LOAD_PATH: path.join(component, 'loadNapCat.js'), NAPCAT_INJECT_PATH: path.join(component, 'NapCatWinBootHook.dll'), NAPCAT_QQ_PACKAGE_INFO_PATH: pkg });
         executable = path.join(component, 'NapCatWinBootMain.exe');
         args = [installation.path, path.join(component, 'NapCatWinBootHook.dll')];
@@ -136,7 +136,7 @@ export class RuntimeManager {
   private async prepareMac(qq: QQInstallation, component: string, signal: AbortSignal) {
     const bundle = path.join(this.root, 'QQRuntime.app');
     const marker = path.join(this.root, 'qq-runtime.json');
-    const identity = JSON.stringify({ path: qq.path, version: qq.version, architecture: qq.architecture, loader: 1 });
+    const identity = JSON.stringify({ path: qq.path, version: qq.version, architecture: qq.architecture, loader: 2 });
     if (await exists(marker) && await readFile(marker, 'utf8') === identity && await exists(path.join(bundle, 'Contents/MacOS/QQ'))) return path.join(bundle, 'Contents/MacOS/QQ');
     this.report('正在准备独立 QQ 运行副本 · 约需 1 GB 空间');
     await exec('/usr/bin/codesign', ['--verify', qq.path], { signal });
@@ -146,11 +146,11 @@ export class RuntimeManager {
       await exec('/usr/bin/ditto', [qq.path, staging], { signal, timeout: 180_000 });
       const appDir = path.join(staging, 'Contents/Resources/app');
       const pkg = await readJSON(path.join(appDir, 'package.json'));
-      await saveJSON(path.join(appDir, 'package.json'), { ...pkg, main: './qunxun-loader.cjs' });
+      await saveJSON(path.join(appDir, 'package.json'), { ...pkg, main: './chancekit-loader.cjs' });
       // NapCat's macOS data path is derived from os.homedir, not Electron userData.
       // A process-local shim isolates its profile without changing HOME or linking old QQ/QCE stores.
-      const loader = `const fs = require('node:fs');\nconst os = require('node:os');\nconst path = require('node:path');\nconst data = process.env.QUNXUN_QQ_DATA;\nif (!data || !process.env.QUNXUN_NAPCAT_ENTRY) throw new Error('Launch this runtime from Qunxun');\nfs.mkdirSync(path.join(data, 'Library/Application Support/QQ'), {recursive:true});\nos.homedir = () => data;\nrequire('node:module').syncBuiltinESMExports();\nrequire('electron').app.setPath('userData', path.join(data, 'electron'));\nimport(require('node:url').pathToFileURL(process.env.QUNXUN_NAPCAT_ENTRY).href).catch(e => { console.error(e); process.exit(1); });\n`;
-      await writeFile(path.join(appDir, 'qunxun-loader.cjs'), loader);
+      const loader = `const fs = require('node:fs');\nconst os = require('node:os');\nconst path = require('node:path');\nconst data = process.env.CHANCEKIT_QQ_DATA;\nif (!data || !process.env.CHANCEKIT_NAPCAT_ENTRY) throw new Error('Launch this runtime from ChanceKit');\nfs.mkdirSync(path.join(data, 'Library/Application Support/QQ'), {recursive:true});\nos.homedir = () => data;\nrequire('node:module').syncBuiltinESMExports();\nrequire('electron').app.setPath('userData', path.join(data, 'electron'));\nimport(require('node:url').pathToFileURL(process.env.CHANCEKIT_NAPCAT_ENTRY).href).catch(e => { console.error(e); process.exit(1); });\n`;
+      await writeFile(path.join(appDir, 'chancekit-loader.cjs'), loader);
       const entitlements = path.join(this.root, 'runtime-entitlements.plist');
       await writeFile(entitlements, '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/><key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/><key>com.apple.security.cs.disable-library-validation</key><true/><key>com.apple.security.cs.disable-executable-page-protection</key><true/><key>com.apple.security.network.client</key><true/><key>com.apple.security.network.server</key><true/></dict></plist>');
       this.report('正在签名独立 QQ 运行副本');

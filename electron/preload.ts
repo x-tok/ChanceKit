@@ -2,15 +2,15 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { AppEvent, Command, DesktopBridge } from '../src/shared';
 
 const bridge: DesktopBridge = {
-  request: <T>(command: Command): Promise<T> => ipcRenderer.invoke('qunxun:request', command),
+  request: <T>(command: Command): Promise<T> => ipcRenderer.invoke('chancekit:request', command),
   subscribe(listener) {
     const handler = (_event: unknown, payload: AppEvent) => listener(payload);
-    ipcRenderer.on('qunxun:event', handler);
-    return () => ipcRenderer.removeListener('qunxun:event', handler);
+    ipcRenderer.on('chancekit:event', handler);
+    return () => ipcRenderer.removeListener('chancekit:event', handler);
   },
-  chooseQQ: () => ipcRenderer.invoke('qunxun:choose-qq'),
-  exportMessages: (groupId: string) => ipcRenderer.invoke('qunxun:export', groupId),
-  openExternal: (url: string) => ipcRenderer.invoke('qunxun:open', url),
-  savedConnection: () => ipcRenderer.invoke('qunxun:connection'),
+  chooseQQ: () => ipcRenderer.invoke('chancekit:choose-qq'),
+  exportMessages: (groupId: string) => ipcRenderer.invoke('chancekit:export', groupId),
+  openExternal: (url: string) => ipcRenderer.invoke('chancekit:open', url),
+  savedConnection: () => ipcRenderer.invoke('chancekit:connection'),
 };
 contextBridge.exposeInMainWorld('desktop', bridge);

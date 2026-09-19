@@ -8,7 +8,7 @@ import { installBundledNapCat, RELEASE } from '../electron/core/component';
 const archive = path.resolve('resources/napcat', RELEASE.archive);
 
 test('fresh component installation is offline, reusable, and does not modify bundled resources', async t => {
-  const folder = await mkdtemp(path.join(os.tmpdir(), 'qunxun offline '));
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'chancekit offline '));
   const network = t.mock.method(globalThis, 'fetch', async () => { throw new Error('Network disabled'); });
   const reports: string[] = [];
   const before = await stat(archive);
@@ -33,17 +33,17 @@ test('fresh component installation is offline, reusable, and does not modify bun
 });
 
 test('missing and checksum-corrupt bundles fail without network fallback or partial installation', async t => {
-  const folder = await mkdtemp(path.join(os.tmpdir(), 'qunxun-component-failure-'));
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'chancekit-component-failure-'));
   const network = t.mock.method(globalThis, 'fetch', async () => { throw new Error('Network disabled'); });
   const signal = new AbortController().signal;
   try {
-    await assert.rejects(installBundledNapCat(folder, path.join(folder, 'missing.zip'), () => {}, signal), /重新安装群讯/);
+    await assert.rejects(installBundledNapCat(folder, path.join(folder, 'missing.zip'), () => {}, signal), /重新安装见机/);
     const corrupt = path.join(folder, 'corrupt.zip');
     await copyFile(archive, corrupt);
     const handle = await open(corrupt, 'r+');
     try { await handle.write(Buffer.from('BAD!'), 0, 4, 0); } finally { await handle.close(); }
     assert.equal((await stat(corrupt)).size, RELEASE.size);
-    await assert.rejects(installBundledNapCat(folder, corrupt, () => {}, signal), /重新安装群讯/);
+    await assert.rejects(installBundledNapCat(folder, corrupt, () => {}, signal), /重新安装见机/);
     await assert.rejects(stat(path.join(folder, `napcat-${RELEASE.version}`)), { code: 'ENOENT' });
     assert.equal(network.mock.callCount(), 0);
     const canceled = new AbortController();

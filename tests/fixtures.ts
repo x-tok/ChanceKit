@@ -34,7 +34,7 @@ export async function mockNapCat() {
       const { action, params, echo } = JSON.parse(bytes.toString());
       calls.push({ action, params });
       const ok = (data: unknown) => socket.send(JSON.stringify({ status: 'ok', retcode: 0, data, echo }));
-      if (action === 'get_login_info') return ok({ user_id: 100010001, nickname: '群讯测试账号' });
+      if (action === 'get_login_info') return ok({ user_id: 100010001, nickname: '见机测试账号' });
       if (action === 'get_group_list') return ok([
         { group_id: 731234567, group_name: '2027 届校园招聘信息交流（测试）', member_count: 387, max_member_count: 500 },
         { group_id: 731234568, group_name: '宣讲会与双选会通知（测试）', member_count: 216, max_member_count: 500 },

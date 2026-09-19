@@ -3,6 +3,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, Check, CheckCheck, ChevronDown, Chevr
 import QRCode from 'qrcode';
 import type { AppState, ConnectionConfig, Group, HistoryResult, Message, MessagePage, QQInstallation, Segment } from './shared';
 import { bridge, isDesktop } from './bridge';
+import { BRAND } from './brand';
 import s from './App.module.css';
 
 const initialState: AppState = { phase: 'idle', detail: '尚未连接 QQ', runtime: null, groups: [], archived: 0, historyBusy: false, logs: [] };
@@ -47,7 +48,10 @@ export function App() {
   return <div className={s.app}>
     <a className={s.skipLink} href="#main-content">跳到主要内容</a>
     <aside className={s.navigation}>
-      <div className={s.brand}><span className={s.brandMark}><MessageCircle size={24} strokeWidth={1.8} /></span><span>群讯<small>QUNXUN</small></span></div>
+      <div className={s.brandBlock}>
+        <div className={s.brand}><span className={s.brandMark}><MessageCircle size={24} strokeWidth={1.8} /></span><span>{BRAND.name}<small>{BRAND.englishName}</small></span></div>
+        <p className={s.brandSubtitle}>{BRAND.subtitle}</p>
+      </div>
       <nav aria-label="主导航">
         <button className={view === 'messages' ? s.navActive : ''} onClick={() => setView('messages')}><MessageCircle size={18} /><span>群消息</span>{state.groups.filter(g => g.followed).length > 0 && <small>{state.groups.filter(g => g.followed).length}</small>}</button>
         <button className={view === 'connect' ? s.navActive : ''} onClick={() => setView('connect')}><Plug size={18} /><span>连接 QQ</span></button>
@@ -139,7 +143,7 @@ function Connection({ state, run, onMessages }: { state: AppState; run: (action:
           </div>
           <h3>{state.phase === 'qr' ? '使用手机 QQ 扫码确认' : busy ? state.detail : '等待生成登录二维码'}</h3>
           {state.phase === 'qr' && <button type="button" className={s.textButton} onClick={() => void run(() => bridge.request({ type: 'refreshQR' }))}><RefreshCw size={15} />刷新二维码</button>}
-          <span className={s.authFootnote}><ShieldCheck size={14} />无需在群讯中输入 QQ 密码</span>
+          <span className={s.authFootnote}><ShieldCheck size={14} />无需在{BRAND.name}中输入 QQ 密码</span>
         </>}
       </div>
     </div>

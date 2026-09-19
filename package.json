@@ -1,8 +1,8 @@
 {
-  "name": "qunxun-desktop",
-  "productName": "群讯",
+  "name": "chancekit",
+  "productName": "见机",
   "version": "0.1.0",
-  "description": "Local QQ group message workspace",
+  "description": "ChanceKit - 不让机会淹没在消息里",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.cjs",
@@ -44,8 +44,8 @@
     "vite": "^7.2.2"
   },
   "build": {
-    "appId": "app.qunxun.desktop",
-    "productName": "群讯",
+    "appId": "app.chancekit",
+    "productName": "见机",
     "directories": { "output": "release" },
     "files": ["dist/**", "dist-electron/**", "package.json"],
     "extraResources": [{ "from": "resources/napcat", "to": "napcat", "filter": ["NapCat.Shell.zip", "manifest.json", "NOTICE.md"] }],

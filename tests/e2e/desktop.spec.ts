@@ -7,15 +7,18 @@ import { preview } from 'vite';
 
 test('desktop connects to NapCat, archives history and live messages, and renders window sizes', async () => {
   const fixture = await mockNapCat();
-  const folder = await mkdtemp(path.join(os.tmpdir(), 'qunxun-e2e-'));
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'chancekit-e2e-'));
   const env: Record<string, string> = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
   delete env.ELECTRON_RUN_AS_NODE;
-  const app = await electron.launch({ args: ['.'], env: { ...env, QUNXUN_TEST_DATA: folder } });
+  const app = await electron.launch({ args: ['.'], env: { ...env, CHANCEKIT_TEST_DATA: folder } });
   const page = await app.firstWindow();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   try {
+    await expect(page).toHaveTitle('见机');
+    expect(await app.evaluate(({ app }) => app.getName())).toBe('见机');
     await expect(page.getByRole('heading', { name: '连接你的 QQ' })).toBeVisible();
+    await expect(page.getByText('不让机会淹没在消息里', { exact: true })).toBeVisible();
     await page.screenshot({ path: 'test-results/connection-desktop.png' });
     await page.getByRole('button', { name: '已有 NapCat' }).click();
     await page.getByLabel('消息服务地址').fill(fixture.config.wsUrl);
@@ -68,6 +71,7 @@ test('browser preview stays usable at narrow widths without a desktop bridge', a
     await expect(page.getByRole('heading', { name: '连接你的 QQ' })).toBeVisible();
     for (const width of [1280, 760, 375, 320]) {
       await page.setViewportSize({ width, height: 820 });
+      await expect(page.getByText('不让机会淹没在消息里', { exact: true })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.screenshot({ path: `test-results/connection-${width}.png` });
       await page.getByRole('button', { name: '已有 NapCat' }).click();

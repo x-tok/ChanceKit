@@ -24,7 +24,7 @@ export async function installBundledNapCat(root: string, archive: string, report
     if (hash.digest('hex') !== RELEASE.sha256) throw new Error('checksum mismatch');
   } catch (error) {
     signal.throwIfAborted();
-    throw new Error('内置 NapCat 组件缺失或损坏，请重新安装群讯。', { cause: error });
+    throw new Error('内置 NapCat 组件缺失或损坏，请重新安装见机。', { cause: error });
   }
 
   const staging = `${dest}.staging`;
@@ -39,7 +39,7 @@ export async function installBundledNapCat(root: string, archive: string, report
       if ((entry.externalFileAttributes >>> 16 & 0o170000) === 0o120000) throw new Error('组件包含不允许的符号链接。');
     } });
     signal.throwIfAborted();
-    if (!(await Promise.all(requiredFiles.map(file => exists(path.join(staging, file))))).every(Boolean)) throw new Error('内置组件内容不完整，请重新安装群讯。');
+    if (!(await Promise.all(requiredFiles.map(file => exists(path.join(staging, file))))).every(Boolean)) throw new Error('内置组件内容不完整，请重新安装见机。');
     await writeFile(path.join(staging, '.verified'), RELEASE.sha256, { mode: 0o600 });
     await rm(dest, { recursive: true, force: true });
     await rename(staging, dest);

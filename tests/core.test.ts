@@ -85,7 +85,7 @@ test('An invalid access token stays failed until the user retries', async () => 
 
 test('End-to-end service: groups, paged history, live dedup, export, offline reads and fresh cursors', async () => {
   const fixture = await mockNapCat();
-  const folder = await mkdtemp(path.join(os.tmpdir(), 'qunxun-service-'));
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'chancekit-service-'));
   const events: any[] = [];
   const service = new AppService(folder, new Store(path.join(folder, 'test.sqlite')), event => events.push(event));
   try {
