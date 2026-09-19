@@ -5,6 +5,8 @@ import { promisify } from 'node:util';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { installBundledNapCat } from './component';
+import { macLoader, macQuitCommand } from './mac-loader';
+import { OneBot } from './onebot';
 import { runtimeFiles, runtimePathExists, discardRuntimePath, recoverRuntimeDirectory, replaceRuntimeDirectory } from './runtime-files';
 import type { ConnectionConfig, QQInstallation } from '../../src/shared';
 
@@ -13,8 +15,18 @@ const { mkdir, mkdtemp, readFile, writeFile, readdir, stat } = runtimeFiles;
 const exists = runtimePathExists;
 const readJSON = async (p: string) => JSON.parse(await readFile(p, 'utf8'));
 const saveJSON = async (p: string, value: unknown) => writeFile(p, JSON.stringify(value, null, 2), { mode: 0o600 });
-const macLoader = `const fs = require('node:fs');\nconst os = require('node:os');\nconst path = require('node:path');\nconst data = process.env.CHANCEKIT_QQ_DATA;\nif (!data || !process.env.CHANCEKIT_NAPCAT_ENTRY) throw new Error('Launch this runtime from ChanceKit');\nfs.mkdirSync(path.join(data, 'Library/Application Support/QQ'), {recursive:true});\nos.homedir = () => data;\nrequire('node:module').syncBuiltinESMExports();\nrequire('electron').app.setPath('userData', path.join(data, 'electron'));\nimport(require('node:url').pathToFileURL(process.env.CHANCEKIT_NAPCAT_ENTRY).href).catch(e => { console.error(e); process.exit(1); });\n`;
 const macEntitlements = '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/><key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/><key>com.apple.security.cs.disable-library-validation</key><true/><key>com.apple.security.cs.disable-executable-page-protection</key><true/><key>com.apple.security.network.client</key><true/><key>com.apple.security.network.server</key><true/></dict></plist>';
+
+const hasExited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
+function waitForExit(child: ChildProcess, timeout: number): Promise<boolean> {
+  if (hasExited(child)) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const done = (exited: boolean) => { clearTimeout(timer); child.off('exit', onExit); resolve(exited); };
+    const onExit = () => done(true);
+    const timer = setTimeout(() => done(false), timeout);
+    child.once('exit', onExit);
+  });
+}
 
 async function windowsPackage(exe: string): Promise<string> {
   const root = path.dirname(exe);
@@ -69,12 +81,14 @@ export async function freePort(): Promise<number> {
 
 export class RuntimeManager {
   private child?: ChildProcess;
+  private connection?: ConnectionConfig;
   private abort?: AbortController;
   private stopping = false;
+  private stopPending?: Promise<void>;
   constructor(private root: string, private report: (text: string) => void, private exited: (text: string) => void, private componentArchive: string) {}
 
   async start(installation: QQInstallation, autoLoginAccount = ''): Promise<ConnectionConfig> {
-    if (this.child || this.abort) throw new Error('连接组件已经在运行或准备中。');
+    if (this.child || this.abort || this.stopPending) throw new Error('连接组件已经在运行或准备中。');
     if (!['darwin', 'win32'].includes(process.platform)) throw new Error('本机自动启动仅支持 macOS 和 Windows。');
     this.stopping = false;
     this.abort = new AbortController();
@@ -121,8 +135,10 @@ export class RuntimeManager {
       }
       signal.throwIfAborted();
       this.report('正在启动 QQ 连接组件');
-      const child = spawn(executable, args, { cwd: component, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(executable, args, { cwd: component, env, windowsHide: true, detached: process.platform !== 'win32', stdio: [process.platform === 'darwin' ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
       this.child = child;
+      this.connection = config;
+      child.stdin?.on('error', () => {}); // QQ can exit between checking the pipe and writing the quit command.
       // Upstream stdout may contain login URLs and tokens. Consume it without forwarding or persisting it.
       child.stdout?.resume();
       child.stderr?.resume();
@@ -191,20 +207,58 @@ export class RuntimeManager {
     return executable;
   }
 
-  async stop() {
+  stop(): Promise<void> {
     this.stopping = true;
     this.abort?.abort();
+    this.stopPending ??= this.stopOwnedChild().finally(() => { this.stopPending = undefined; });
+    return this.stopPending;
+  }
+
+  private async stopOwnedChild() {
     const child = this.child;
-    if (!child?.pid) return;
-    this.child = undefined;
-    if (process.platform === 'win32') {
-      await exec('taskkill.exe', ['/PID', String(child.pid), '/T'], { windowsHide: true }).catch(() => {});
-    } else {
-      try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill('SIGTERM'); }
-      await new Promise<void>(resolve => {
-        const timer = setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} resolve(); }, 3000);
-        child.once('exit', () => { clearTimeout(timer); resolve(); });
-      });
+    const connection = this.connection;
+    this.connection = undefined;
+    if (!child?.pid || hasExited(child)) {
+      if (this.child === child) this.child = undefined;
+      return;
+    }
+    try {
+      if (connection) {
+        this.report('正在请求 QQ 正常退出');
+        const bot = new OneBot(3000);
+        const exited = waitForExit(child, 3000);
+        // bot_exit calls process.exit(0), so the socket can close without an action response.
+        // Use the owned process exit as confirmation, never a disconnected WebSocket.
+        const request = bot.connect(connection.wsUrl, connection.accessToken)
+          .then(() => bot.call('bot_exit')).catch(() => {});
+        const stopped = await exited;
+        bot.close();
+        await request;
+        if (stopped || hasExited(child)) return;
+      }
+      if (process.platform === 'darwin' && child.stdin?.writable && !child.stdin.destroyed) {
+        const exited = waitForExit(child, 2000);
+        child.stdin.write(`${macQuitCommand}\n`);
+        if (await exited || hasExited(child)) return;
+      }
+      this.report('正在停止 QQ 连接进程');
+      const terminated = waitForExit(child, 2000);
+      if (process.platform === 'win32') {
+        await exec('taskkill.exe', ['/PID', String(child.pid), '/T'], { windowsHide: true, timeout: 2000 }).catch(() => {});
+      } else {
+        try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill('SIGTERM'); }
+      }
+      if (await terminated || hasExited(child)) return;
+      this.report('QQ 未响应退出请求，正在结束连接进程');
+      const killed = waitForExit(child, 1000);
+      if (process.platform === 'win32') {
+        await exec('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, timeout: 1000 }).catch(() => {});
+      } else {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+      }
+      if (!await killed) throw new Error('QQ 连接进程尚未退出，请稍后重试停止连接。');
+    } finally {
+      if (this.child === child && hasExited(child)) this.child = undefined;
     }
   }
 }

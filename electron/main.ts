@@ -15,6 +15,8 @@ app.setPath('userData', profile);
 if (!app.requestSingleInstanceLock()) app.quit();
 let window: BrowserWindow | undefined;
 let quitting = false;
+let shutdownComplete = false;
+let workerExited = false;
 let worker: Electron.UtilityProcess;
 const pending = new Map<string, { resolve: (data: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
 
@@ -41,6 +43,7 @@ app.whenReady().then(async () => {
     });
   });
   worker.on('exit', () => {
+    workerExited = true;
     for (const call of pending.values()) { clearTimeout(call.timer); call.reject(new Error('消息服务已退出，请重新打开应用。')); }
     pending.clear();
     if (!quitting && window) dialog.showErrorBox('消息服务已停止', `请重新打开${BRAND.name}。已经归档的消息保留在本机。`);
@@ -105,9 +108,13 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
-  if (quitting || !worker) return;
-  event.preventDefault(); quitting = true;
+  if (shutdownComplete || !worker || workerExited) return;
+  event.preventDefault();
+  if (quitting) return;
+  quitting = true;
+  const finish = () => { clearTimeout(timer); shutdownComplete = true; app.quit(); };
+  // Allow the protocol request and process fallback to finish before killing the worker.
+  const timer = setTimeout(() => { worker.kill(); finish(); }, 10_000);
+  worker.once('exit', finish);
   worker.postMessage({ type: 'shutdown' });
-  const timer = setTimeout(() => { worker.kill(); app.quit(); }, 6000);
-  worker.once('exit', () => { clearTimeout(timer); app.quit(); });
 });

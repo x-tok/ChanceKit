@@ -18,9 +18,11 @@ npm run test:e2e
 | `tests/component.test.ts` | 离线组件安装、摘要校验、残缺组件修复与配置保留 |
 | `tests/profile.test.ts` | 旧目录迁移、SQLite WAL 与登录文件保留、已有目录不覆盖 |
 | `tests/runtime-files.test.ts` | 运行副本替换、失败回滚、中断恢复、清理错误处理 |
+| `tests/runtime-stop.test.ts` | 本机 `bot_exit`、无响应时的退出等待、重复停止、扫码前管道退出与已退出进程保护 |
 | `tests/release.test.mjs` | 版本一致、拒绝重复发布、拒绝缺失或额外附件、上传失败或摘要不符时保持草稿 |
 | `tests/e2e/desktop.spec.ts` | 独立 Electron 窗口中的模拟扫码、群列表、历史与实时消息、搜索、断线重连、账号显示和窗口尺寸 |
 | `tests/e2e/runtime-files.spec.ts` | 真实 Electron utilityProcess 中含有效 ASAR 文件的目录清理与替换 |
+| `tests/e2e/qq-exit.spec.ts` | 真实 Electron 加载 macOS 运行入口后，通过私有 stdin 管道正常退出，不加载 QQ 或真实登录资料 |
 
 Electron 桌面布局覆盖 1240x820、900x820、1240x640、900x640；浏览器预览覆盖 1280、760、375、320px。测试截图与失败 trace 位于 `test-results/`，不提交到 Git。
 
@@ -31,6 +33,10 @@ Electron 桌面布局覆盖 1240x820、900x820、1240x640、900x640；浏览器�
 Electron 会把 ASAR 当作虚拟目录。运行目录管理使用 `original-fs`，并通过真实 Electron 后台进程测试这个差异，不能仅依赖普通 Node 文件系统测试。
 
 新副本在独立临时目录完成准备和校验后再替换；替换失败恢复旧副本，遗留 `.previous` 可恢复。NapCat 同版本修复保留配置，QQ 登录资料与消息库不在替换目录中。
+
+退出测试使用自建的子进程和模拟 OneBot 服务。NapCat `bot_exit` 会直接退出、可能来不及回复，因此以进程退出事件确认结果；WebSocket 断开不代表进程已经结束。macOS 的启动入口在登录前就接收私有管道退出指令，不依靠 JavaScript 的 `SIGTERM` 监听覆盖 Electron 原生处理。主程序等待后台清理完成，重复退出请求不能提前跳过等待。
+
+这些测试验证退出指令和等待顺序，不替代特定 QQ 版本的实机验收；验证期间不自动操作真实 QQ 账号。外接 NapCat 的断开测试同时检查服务仍可接受新连接。
 
 ### 账号显示
 

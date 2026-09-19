@@ -1,7 +1,7 @@
 {
   "name": "chancekit",
   "productName": "见机",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ChanceKit - 不让机会淹没在消息里",
   "private": true,
   "type": "module",
