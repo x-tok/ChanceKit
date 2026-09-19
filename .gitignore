@@ -1,12 +1,62 @@
+# Dependencies and generated output
 node_modules/
-dist/
-dist-electron/
-release/
-.cache/
-.dev-data/
-test-results/
-playwright-report/
+/dist/
+/dist-electron/
+/release/
+/.cache/
+/coverage/
+*.tsbuildinfo
+
+# Local profiles, QQ copies and message exports
+/.dev-data/
+/runtime/
+/exports/
+qq-profile/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.jsonl
+connection.enc
+webui.json
+onebot11*.json
+
+# Credentials and signing material (examples may be committed)
+.env
+.env.*
+!.env.example
+!.env.*.example
+.secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+*.mobileprovision
+
+# Test output, logs and private screenshots
+/test-results/
+/playwright-report/
+/blob-report/
+/screenshots/
+/recordings/
+codex-clipboard-*.png
 *.log
-.DS_Store
+
+# Downloaded components and installers belong in release assets, not Git
 resources/napcat/*.zip
 resources/napcat/*.part
+*.app/
+*.dmg
+*.exe
+*.zip
+
+# OS and local editor state
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
