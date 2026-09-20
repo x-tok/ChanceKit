@@ -1,0 +1,125 @@
+name: Release ChanceKit
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: Mark this release as a pre-release
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chancekit-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate version and check for an existing release
+        id: plan
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PRERELEASE: ${{ inputs.prerelease }}
+        with:
+          script: |
+            const { readReleaseInfo, assertReleaseAvailable } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/github-release.mjs`);
+            const info = await readReleaseInfo(process.env.PRERELEASE === 'true');
+            await assertReleaseAvailable(github, context.repo, info.tag);
+            core.setOutput('version', info.version);
+            core.setOutput('tag', info.tag);
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: mac
+            arch: arm64
+          - runner: macos-15-intel
+            platform: mac
+            arch: x64
+          - runner: windows-2022
+            platform: win
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Download and verify the pinned NapCat bundle
+        run: npm run prepare:napcat
+      - run: npm run build
+      - run: npm test
+      - name: Test Electron with an isolated profile and simulated QQ messages
+        run: npm run test:e2e
+      - name: Package macOS (ad-hoc signing, no notarization)
+        if: matrix.platform == 'mac'
+        run: npx --no-install electron-builder --mac dmg zip --${{ matrix.arch }} --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false
+      - name: Package Windows (unsigned)
+        if: matrix.platform == 'win'
+        run: npx --no-install electron-builder --win nsis --x64 --publish never
+      - name: Verify packaged entry points and bundled NapCat
+        run: node scripts/verify-package.mjs
+      - name: Upload installers only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: installers-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/ChanceKit-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}.dmg
+            release/ChanceKit-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}.zip
+            release/ChanceKit-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: installers-*
+          path: release-assets
+          merge-multiple: true
+      - name: Upload, verify, then publish the release
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PRERELEASE: ${{ inputs.prerelease }}
+        with:
+          script: |
+            const { publishRelease } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/github-release.mjs`);
+            const release = await publishRelease(github, context, process.env.PRERELEASE === 'true');
+            await core.summary.addLink('Download ChanceKit', release.html_url).write();

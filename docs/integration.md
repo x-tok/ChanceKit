@@ -24,11 +24,11 @@ sha256: bcdd8bdb9e44bd0cf6a90908e572141787fd9e98cb8d8eecc5adf25bbdcabb94
 
 1. 检测官方 QQ 的 `package.json`，拒绝已被改为第三方入口的副本。
 2. 原 QQ 必须正常退出。原始应用只读取，不修改其入口或签名。
-3. 复制到本应用的 `QQRuntime.app`，在副本中生成 `chancekit-loader.cjs` 加载入口并做 ad-hoc 签名。
+3. 复制到本应用的 `QQRuntime.app`，在副本中生成 `chancekit-loader.cjs` 加载入口，对副本及其辅助进程和框架做 ad-hoc 签名并递归校验。使用多进程启动，不传入 `--single-process`，避免 QQNT 在退出清理时触发 `SIGABRT`。
 4. NapCat 当前通过 `os.homedir()` 构造 macOS 资料目录。加载入口只在自己的 QQ 进程内替换这个函数，指向本应用的 `runtime/qq-profile`，并同步 Node 内置模块导出。系统 HOME 和原 QQ 配置不变。
 5. 使用 QQ 自带 Electron 启动 NapCat，设置独立 `NAPCAT_WORKDIR`。`CHANCEKIT_NAPCAT_ENTRY` 和 `CHANCEKIT_QQ_DATA` 分别指定组件入口与私有资料目录，不使用应用壳内的 Electron 加载 QQ 的 native wrapper。
 
-副本复用会核对来源包摘要、关键文件身份、加载器与签名权限内容的摘要、实际加载入口以及代码签名。更改加载器后自动失效，不依赖手动递增版本号。准备副本前也会拒绝仍在运行的同路径 QQ 连接进程。
+副本复用会核对来源包摘要、关键文件身份、加载器与签名权限内容的摘要、启动参数、签名策略、实际加载入口以及递归代码签名。更改运行策略后自动失效，不依赖手动递增版本号。准备副本前也会拒绝仍在运行的同路径 QQ 连接进程。
 
 QQ 副本与 NapCat 组件的磁盘管理在 Electron 中使用 `original-fs`，将 `application.asar` 当作真实文件处理。每次准备使用独立临时目录；新副本校验通过后，将旧目录改名为 `.previous`，再发布新目录。发布失败尝试恢复旧目录；启动时发现只有 `.previous` 则先恢复。清理旧目录失败不会覆盖原始错误或使已经完成的替换变成失败。修复同版本 NapCat 时保留 `config`；QQ 的 `qq-profile` 和消息数据库不在这些替换目录内。
 

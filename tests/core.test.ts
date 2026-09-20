@@ -139,6 +139,19 @@ test('An invalid access token stays failed until the user retries', async () => 
   } finally { await service.close(); await fixture.close(); }
 });
 
+test('disconnecting an external NapCat leaves its QQ process available', async () => {
+  const fixture = await mockNapCat();
+  const service = new AppService(os.tmpdir(), new Store(':memory:'), () => {});
+  const observer = new OneBot(500);
+  try {
+    await service.request({ type: 'connect', config: fixture.config });
+    await service.close();
+    assert.ok(fixture.calls.every(call => call.action !== 'bot_exit'));
+    await observer.connect(fixture.config.wsUrl, fixture.config.accessToken);
+    assert.equal((await observer.call('get_login_info')).user_id, 100010001);
+  } finally { observer.close(); await fixture.close(); }
+});
+
 test('End-to-end service: groups, paged history, live dedup, export, offline reads and fresh cursors', async () => {
   const fixture = await mockNapCat();
   const folder = await mkdtemp(path.join(os.tmpdir(), 'chancekit-service-'));

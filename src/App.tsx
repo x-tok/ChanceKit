@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, Bot, CalendarDays, Check, CheckCheck, ChevronDown, ChevronUp, CircleHelp, Copy, Download, ExternalLink, FileText, FolderOpen, Hash, ImageOff, Link2, LoaderCircle, MessageCircle, Monitor, Plug, QrCode, RefreshCw, Search, ShieldCheck, Square, Star, Unplug, Users, Wifi, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, Bot, CalendarDays, Check, CheckCheck, ChevronDown, ChevronUp, CircleHelp, Download, ExternalLink, FileText, FolderOpen, Hash, ImageOff, Link2, LoaderCircle, MessageCircle, Monitor, Plug, QrCode, RefreshCw, Search, ShieldCheck, Square, Star, Unplug, Users, Wifi, X } from 'lucide-react';
 import QRCode from 'qrcode';
 import type { Account, AppState, ConnectionConfig, Group, HistoryResult, Message, MessagePage, QQInstallation, Segment } from './shared';
 import { bridge, isDesktop } from './bridge';
@@ -284,5 +284,5 @@ function ForwardMessage({ id, notify }: { id: string; notify: (text: string) => 
 }
 function MessageRow({ message, notify }: { message: Message; notify: (text: string) => void }) {
   const [details, setDetails] = useState(false);
-  return <article className={s.messageRow}><Avatar name={message.senderName} /><div className={s.messageBody}><div className={s.messageMeta}><strong>{message.senderName}</strong><time dateTime={new Date(message.time * 1000).toISOString()}>{time(message.time * 1000)}</time><div className={s.messageTools}><IconButton label="复制消息文字" onClick={() => void navigator.clipboard.writeText(message.text).then(() => notify('消息文字已复制'), () => notify('无法访问剪贴板'))}><Copy size={13} /></IconButton><IconButton label="查看原始消息" onClick={() => setDetails(!details)}><FileText size={13} /></IconButton></div></div><div className={s.messageContent}><MessageSegments segments={message.segments} notify={notify} /></div>{details && <pre className={s.rawMessage}>{JSON.stringify(message.raw, null, 2)}</pre>}</div></article>;
+  return <article className={s.messageRow}><Avatar name={message.senderName} /><div className={s.messageBody}><div className={s.messageMeta}><strong>{message.senderName}</strong><time dateTime={new Date(message.time * 1000).toISOString()}>{time(message.time * 1000)}</time><div className={s.messageTools}><IconButton label="查看原始消息" onClick={() => setDetails(!details)}><FileText size={13} /></IconButton></div></div><div className={s.messageContent}><MessageSegments segments={message.segments} notify={notify} /></div>{details && <pre className={s.rawMessage}>{JSON.stringify(message.raw, null, 2)}</pre>}</div></article>;
 }

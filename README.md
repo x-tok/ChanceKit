@@ -6,7 +6,7 @@
 
 见机是一个面向就业信息整理的本地桌面应用。从关注的 QQ 群收集消息，保存到本机，方便查找招聘通知、宣讲会和双选会信息。
 
-当前为 **0.1.0 开发版**，已实现 QQ 连接、群聊选择、消息归档、pi agent 模型配置、活动提取与每周日程。更广泛的机会聚合与微信接入尚未实现。本仓库是独立项目，项目名和 npm 包名均为 `chancekit`。
+当前为 **0.1.2 开发版**，已实现 QQ 连接、群聊选择、消息归档、pi agent 模型配置、活动提取与每周日程。更广泛的机会聚合与微信接入尚未实现。本仓库是独立项目，项目名和 npm 包名均为 `chancekit`。
 
 ## 当前功能
 
@@ -37,7 +37,9 @@
 
 请先自行安装[官方 QQ](https://im.qq.com/)。macOS 首次准备运行副本需要额外约 1 GB 空间，聊天记录和附件引用也会占用空间。
 
-项目目前没有在此 README 中提供正式安装包下载地址。开发者可按下文构建；普通用户收到安装包后，通过 GUI 完成配置，不需要 Node.js、终端或手动编辑配置文件。
+安装包发布后可从 [GitHub Releases](https://github.com/x-tok/ChanceKit/releases) 下载。Apple Silicon 选择 `mac-arm64.dmg`，Intel Mac 选择 `mac-x64.dmg`，Windows 10/11 选择 `win-x64.exe`；完整文件名带有版本号。普通用户通过 GUI 完成配置，不需要 Node.js、终端或手动编辑配置文件。
+
+当前 macOS 安装包没有 Developer ID 正式签名和 Apple 公证。将见机拖入“应用程序”后尝试打开；如被系统阻止，可前往“系统设置 → 隐私与安全性”，找到见机的阻止提示并点击“仍要打开”。不同系统版本的按钮文字可能不同，详见[安装与发布说明](docs/releases.md)。
 
 ### 使用流程
 
@@ -49,6 +51,8 @@
 6. 暂停采集时点击“停止连接”。头像和当前账号显示会清空，本地记录保留。macOS 可在停止完成后重新打开官方 QQ。
 
 首次连接会读取群列表，不会自动下载所有群的全部历史。只有已关注群的新消息会实时归档。退出见机会停止本应用的采集进程。
+
+停止本机连接或退出见机时，会先通过 NapCat 的 `bot_exit` 请求 QQ 正常退出并等待进程结束。macOS 在扫码服务尚未就绪时通过私有进程管道发送退出指令；只有进程持续不响应才使用系统终止作为兜底。不会清除登录资料或聊天库，外接 NapCat 只断开消息连接，不退出其 QQ。
 
 ### 已有 NapCat
 
@@ -149,7 +153,7 @@ NapCat 登录使用 QQ 客户端会话，不是腾讯开放平台 OAuth。第三
 
 ### 更新与数据保留
 
-重新安装或构建后，会检查 QQ 副本的来源、加载入口和签名再决定是否复用。需要重建时先准备临时副本，再替换正式目录；替换失败尝试回滚。组件修复不会清理 `qq-profile` 或业务消息库。
+重新安装或构建后，会检查 QQ 副本的来源、加载入口、启动参数和签名策略再决定是否复用。需要重建时先准备临时副本，再替换正式目录；替换失败尝试回滚。macOS 使用 QQ 的多进程运行方式，同时签名并校验副本中的辅助进程，避免单进程模式在正常退出时触发“QQ 意外退出”。组件修复不会清理 `qq-profile` 或业务消息库。
 
 从旧版“群讯”迁移时，仅在 `ChanceKit` 目录不存在的情况下整体搬移旧数据目录；两者同时存在时不覆盖、不合并。QQ 登录资料与已归档消息保留。**macOS 改名可能导致旧版 `safeStorage` 加密的外接 NapCat 配置无法解密，需要在 GUI 中重新填写地址与令牌**；搬移旧密文不等于系统钥匙串身份也完成迁移。
 
@@ -222,7 +226,13 @@ npm test
 npm run test:e2e
 ```
 
-输出位于 `dist/`、`dist-electron/`、`release/`。macOS 配置为 DMG/ZIP，Windows 为 NSIS 安装器。当前未配置正式代码签名、公证或自动发布流程。
+输出位于 `dist/`、`dist-electron/`、`release/`。macOS 配置为 DMG/ZIP，Windows 为 NSIS 安装器。当前未配置正式代码签名和公证。
+
+### GitHub 手动发布
+
+打开 [Actions → Release ChanceKit](https://github.com/x-tok/ChanceKit/actions/workflows/release.yml)，点击 **Run workflow**，选择 `main` 后运行。版本号读取所选提交的 `package.json`，默认勾选预览版；工作流会构建 macOS arm64/x64 和 Windows x64 安装包，内置 NapCat，并在检查通过后创建 `v版本号` 的 Release。
+
+**普通 push、推送 tag 和 Pull Request 都不会触发发布。** 不需要提前创建 tag、上传安装包或配置签名证书。新版本发布前应同步更新 `package.json` 与 `package-lock.json` 的版本并推送；已有版本不会被覆盖。步骤、失败重试和平台验证边界见[发布说明](docs/releases.md)。
 
 自动测试只连接本机 NapCat 协议模拟服务，使用合成账号和消息。不要把测试数据目录改成正在使用的资料目录，也不要用主账号反复登录代替自动测试。更多规则见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
@@ -236,6 +246,7 @@ electron/worker.ts      utilityProcess 后台服务入口
 electron/core/         OneBot、NapCat、运行管理、业务服务和 SQLite
 resources/napcat/      固定组件清单与来源说明
 scripts/               开发、构建、组件准备与打包校验
+.github/workflows/     仅手动触发的跨平台发布流程
 tests/                 协议、存储、迁移和 Electron 测试
 docs/                  接入细节与验证范围
 DESIGN.md               界面设计约定
