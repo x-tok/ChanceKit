@@ -10,7 +10,7 @@ import { mockNapCat, sample } from '../fixtures';
 import { pdfFixture } from '../pdf-fixtures';
 import type { Activity, ActivityInput } from '../../src/schedule';
 import type { AppState, DesktopBridge } from '../../src/shared';
-import { emptyProcessingStatus, weekStart, chinaToday } from '../../src/schedule';
+import { emptyProcessingStatus, chinaToday } from '../../src/schedule';
 
 const events: ActivityInput[] = [
   { title: '星河科技校园宣讲会', type: '宣讲会', organizer: '星河科技', startDate: '2026-09-24', endDate: null, startTime: '14:30', endTime: '16:00', location: '大学生活动中心 201', audience: '2027 届毕业生', description: '研发岗位介绍与现场简历交流。', registrationUrl: null, deadline: null, evidence: '9月24日14:30，大学生活动中心201' },
@@ -89,7 +89,8 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     expect(peak).toBe(3);
     await page.getByLabel('跳转日期').fill('2026-09-24');
     await expect(page.getByRole('button', { name: '查看活动：星河科技校园宣讲会', exact: true })).toHaveCount(1);
-    await expect(page.getByRole('button', { name: '查看活动：秋季校园双选会', exact: true })).toHaveCount(2);
+    await expect(page.getByRole('button', { name: '查看活动：秋季校园双选会', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('table', { name: '当日活动列表' })).toContainText('9月24日14:30');
     await expect(page.getByRole('region', { name: '日期待确认' })).toContainText('研究院实习交流会');
     await page.screenshot({ path: 'test-results/schedule-desktop.png' });
     await page.getByRole('button', { name: '查看活动：星河科技校园宣讲会', exact: true }).click();
@@ -99,15 +100,16 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     await page.screenshot({ path: 'test-results/schedule-detail.png' });
     await page.getByRole('button', { name: '关闭活动详情' }).click();
     await page.getByLabel('活动类型').selectOption('笔试');
+    await page.getByRole('button', { name: /^2026-09-23 / }).click();
     await expect(page.getByRole('button', { name: '查看活动：星河科技校园宣讲会', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '查看活动：秋招线上笔试', exact: true })).toBeVisible();
     await page.getByLabel('活动类型').selectOption('');
     await page.getByLabel('搜索活动').fill('没有这个活动');
     await expect(page.getByText('没有符合筛选条件的活动')).toBeVisible();
     await page.getByLabel('搜索活动').fill('');
-    await page.getByRole('button', { name: '下一周', exact: true }).click();
-    await expect(page.getByText('本周暂无已提取的活动')).toBeVisible();
-    await page.getByRole('button', { name: '上一周', exact: true }).click();
+    await page.getByRole('button', { name: '后7天', exact: true }).click();
+    await expect(page.getByText('这一天暂无活动', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '前7天', exact: true }).click();
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(900, 640));
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: 'test-results/schedule-900.png' });
@@ -125,7 +127,7 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).completed).toBe(9);
     const ongoing = page.getByRole('region', { name: '跨期事项', exact: true });
     await expect(ongoing.getByRole('button', { name: `查看活动：${ongoingEvent.title}` })).toHaveCount(1);
-    await expect(page.locator('[aria-label="每周活动"]').getByRole('button', { name: `查看活动：${ongoingEvent.title}` })).toHaveCount(0);
+    await expect(page.getByRole('table').getByRole('button', { name: `查看活动：${ongoingEvent.title}` })).toHaveCount(0);
     await expect(ongoing).toContainText('2026-09-09 至 2026-10-15');
     await expect(ongoing).not.toContainText('时间待确认');
     await ongoing.getByRole('button').click();
@@ -136,9 +138,9 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     await page.getByLabel('活动类型').selectOption('宣讲会');
     await expect(ongoing).toHaveCount(0);
     await page.getByLabel('活动类型').selectOption('');
-    await page.getByRole('button', { name: '下一周', exact: true }).click();
+    await page.getByRole('button', { name: '后7天', exact: true }).click();
     await expect(ongoing).toBeVisible();
-    await expect(page.getByText('本周暂无定时日程', { exact: true })).toBeVisible();
+    await expect(page.getByText('这一天暂无活动', { exact: true })).toBeVisible();
     await page.getByLabel('跳转日期').fill('2026-10-19');
     await expect(ongoing).toHaveCount(0);
     await page.getByLabel('跳转日期').fill('2026-09-24');
@@ -219,7 +221,8 @@ test('populated ongoing section and its detail fit desktop and mobile without re
     await page.getByLabel('跳转日期').fill('2026-09-24');
     const ongoing = page.getByRole('region', { name: '跨期事项', exact: true });
     await expect(ongoing.getByRole('button')).toHaveCount(2);
-    await expect(page.getByRole('button', { name: `查看活动：${events[1].title}` })).toHaveCount(2);
+    await page.getByRole('button', { name: /^2026-09-25 / }).click();
+    await expect(page.getByRole('button', { name: `查看活动：${events[1].title}` })).toHaveCount(1);
     for (const width of [1440, 900, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
       await ongoing.scrollIntoViewIfNeeded();
@@ -251,7 +254,7 @@ test('schedule browser preview has real empty states and responsive navigation d
     await page.goto(server.resolvedUrls!.local[0]);
     await page.getByRole('button', { name: '日程', exact: true }).click();
     await expect(page.getByRole('switch', { name: '自动处理' })).toBeDisabled();
-    await expect(page.getByText('本周暂无已提取的活动')).toBeVisible();
+    await expect(page.getByText('这一天暂无活动', { exact: true })).toBeVisible();
     for (const width of [1280, 900, 760, 375, 320]) {
       await page.setViewportSize({ width, height: 820 });
       await expect(page.getByRole('heading', { name: '日程', exact: true })).toBeVisible();
@@ -260,8 +263,8 @@ test('schedule browser preview has real empty states and responsive navigation d
       expect(await page.locator('section[aria-label="日程"]').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: `test-results/schedule-preview-${width}.png` });
     }
-    await page.getByRole('button', { name: '下一周', exact: true }).click();
-    await page.getByRole('button', { name: '本周', exact: true }).click();
-    await expect(page.getByLabel('跳转日期')).toHaveValue(weekStart(chinaToday()));
+    await page.getByRole('button', { name: '后7天', exact: true }).click();
+    await page.getByRole('button', { name: '回到今天', exact: true }).click();
+    await expect(page.getByLabel('跳转日期')).toHaveValue(chinaToday());
   } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
 });

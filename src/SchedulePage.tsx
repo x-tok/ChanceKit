@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, ArrowRight, Bot, CalendarDays, CalendarRange, Check, ChevronRight, Clock3, ExternalLink, LoaderCircle, MapPin, MessageCircle, RefreshCw, Search, Settings2, X } from 'lucide-react';
 import { bridge, isDesktop } from './bridge';
-import { activityOnDate, activityTypes, addDays, chinaToday, emptyProcessingStatus, isOngoingActivity, scheduleProcessingVersion, weekStart, type Activity, type ActivityDetail, type ActivityType, type ProcessingStatus, type SchedulePage } from './schedule';
+import { activityOnDate, activityTimeLabel, activityTypes, addDays, calendarWindowStart, chinaToday, emptyProcessingStatus, isOngoingActivity, scheduleProcessingVersion, type Activity, type ActivityDetail, type ActivityType, type ProcessingStatus, type SchedulePage } from './schedule';
 import type { AppState } from './shared';
 import s from './Schedule.module.css';
 import common from './App.module.css';
 import { RecruitingInformationPanel } from './RecruitingInformation';
 import { SourceMaterials } from './SourceMaterials';
+import { CalendarMessage } from './CalendarMessage';
 
-const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+const weekday = (day: string) => ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date(`${day}T00:00:00Z`).getUTCDay()];
 const errorText = (error: unknown) => (error instanceof Error ? error.message : '操作失败，请重试。').replace(/^Error invoking remote method '[^']+': Error: /, '');
 const shortDate = (value: string) => `${Number(value.slice(5, 7))}月${Number(value.slice(8))}日`;
 const emptyPage: SchedulePage = { activities: [], undated: [] };
 
 export function Schedule({ state, onModels, onGroup }: { state: AppState; onModels: () => void; onGroup: (id: string) => void }) {
-  const [week, setWeek] = useState(() => weekStart(chinaToday()));
+  const [anchor, setAnchor] = useState(chinaToday);
+  const [selectedDate, setSelectedDate] = useState(chinaToday);
+  const week = calendarWindowStart(anchor);
   const [type, setType] = useState<ActivityType | ''>('');
   const [groupId, setGroupId] = useState('');
   const [search, setSearch] = useState('');
@@ -35,11 +38,18 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   const today = chinaToday();
   const days = Array.from({ length: 7 }, (_, index) => addDays(week, index));
   const scheduled = page.activities.filter(activity => !isOngoingActivity(activity));
+  const dailyActivities = scheduled.filter(activity => activityOnDate(activity, selectedDate)).sort((a, b) =>
+    (a.startTime ?? '99:99').localeCompare(b.startTime ?? '99:99') || a.title.localeCompare(b.title, 'zh-CN'));
   const ongoing = page.activities.filter(isOngoingActivity).sort((a, b) =>
     a.endDate!.localeCompare(b.endDate!) || a.startDate!.localeCompare(b.startDate!) || a.title.localeCompare(b.title, 'zh-CN'));
   const groups = state.groups.filter(group => group.followed);
   const accountId = state.localAccount?.id;
   const refresh = useCallback(() => setRevision(value => value + 1), []);
+  const jumpTo = (day: string) => { setAnchor(day); setSelectedDate(day); };
+  const shiftWindow = (offset: number) => {
+    const shifted = addDays(anchor, offset);
+    jumpTo(shifted < '1970-01-01' ? '1970-01-01' : shifted > '2100-12-31' ? '2100-12-31' : shifted);
+  };
 
   useEffect(() => bridge.subscribe(event => {
     if (event.type === 'schedule' || event.type === 'messages') refresh();
@@ -53,6 +63,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   useEffect(() => {
     const ticket = ++requestNumber.current;
     setLoading(true);
+    setPage(emptyPage);
     const timer = setTimeout(() => {
       void Promise.all([
         bridge.schedule({ week, ...(type ? { type } : {}), ...(groupId ? { groupId } : {}), ...(search.trim() ? { search: search.trim() } : {}) }),
@@ -120,15 +131,28 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
       {!isDesktop && <p className={s.banner}><AlertCircle size={16} />浏览器预览：没有本地群消息，处理与保存不可用。</p>}
       {isDesktop && !loading && (status.processorVersion ?? 0) < scheduleProcessingVersion && <p className={s.banner}><RefreshCw size={16} />处理引擎已更新，请重启应用。旧记录会先在本机重新判断；自动处理开启时，仍未解决的记录会自动补处理一次。</p>}
       {status.blockedReason && isDesktop && <p className={s.banner}><AlertCircle size={16} />{status.blockedReason}<button className={common.textButton} onClick={onModels}>模型配置</button></p>}
-      {error && <p className={s.error} role="alert"><AlertCircle size={16} />{error}</p>}
       <div className={s.calendarToolbar}>
         <div className={s.weekNavigation}>
-          <button className={common.iconButton} title="上一周" aria-label="上一周" onClick={() => setWeek(value => addDays(value, -7))}><ArrowLeft size={17} /></button>
-          <h2>{week.slice(0, 4)}年 {shortDate(week)} – {shortDate(days[6])}</h2>
-          <button className={common.iconButton} title="下一周" aria-label="下一周" onClick={() => setWeek(value => addDays(value, 7))}><ArrowRight size={17} /></button>
-          <button className={common.secondaryButton} onClick={() => setWeek(weekStart(today))}>本周</button>
+          <h2>{week.slice(0, 4)}年 {shortDate(week)} 至 {days[6].slice(0, 4) !== week.slice(0, 4) ? `${days[6].slice(0, 4)}年 ` : ''}{shortDate(days[6])}</h2>
+          <button className={common.iconButton} title="前7天" aria-label="前7天" disabled={week === '1970-01-01'} onClick={() => shiftWindow(-7)}><ArrowLeft size={17} /></button>
+          <button className={common.iconButton} title="后7天" aria-label="后7天" disabled={days[6] === '2100-12-31'} onClick={() => shiftWindow(7)}><ArrowRight size={17} /></button>
+          <button className={common.secondaryButton} onClick={() => jumpTo(today)}>回到今天</button>
         </div>
-        <label className={s.datePicker}><CalendarDays size={15} /><input type="date" aria-label="跳转日期" value={week} min="1970-01-01" max="2100-12-31" onChange={event => { if (/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) setWeek(weekStart(event.target.value)); }} /></label>
+        <label className={s.datePicker}><CalendarDays size={15} /><input type="date" aria-label="跳转日期" value={selectedDate} min="1970-01-01" max="2100-12-31"
+          onChange={event => { if (/^\d{4}-\d{2}-\d{2}$/.test(event.target.value) && event.target.validity.valid) jumpTo(event.target.value); }} /></label>
+      </div>
+      <div className={s.dateStrip} aria-label="七天日期" role="group">
+        {days.map(day => {
+          const count = scheduled.filter(activity => activityOnDate(activity, day)).length;
+          return <button key={day} className={`${s.dateButton} ${day === selectedDate ? s.selectedDate : ''}`}
+            aria-label={`${day} ${weekday(day)}${day === today ? ' 今天' : ''}`} aria-pressed={day === selectedDate}
+            aria-current={day === today ? 'date' : undefined} aria-controls="daily-activities"
+            onClick={() => setSelectedDate(day)}>
+            <span>{weekday(day)}</span><strong>{Number(day.slice(8))}</strong>
+            <small>{day === today ? '今天' : `${Number(day.slice(5, 7))}月`}</small>
+            <span className={s.dateCount}>{loading ? '·' : count ? `${count}场` : '无安排'}</span>
+          </button>;
+        })}
       </div>
       <div className={s.filters}>
         <label><span>活动类型</span><select aria-label="活动类型" value={type} onChange={event => setType(event.target.value as ActivityType | '')}><option value="">全部类型</option>{activityTypes.map(type => <option key={type} value={type}>{type}</option>)}</select></label>
@@ -136,17 +160,31 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
         <div className={s.search}><Search size={15} /><input aria-label="搜索活动" placeholder="搜索活动、单位或地点" value={search} onChange={event => setSearch(event.target.value)} maxLength={300} /></div>
         <button className={common.iconButton} aria-label="刷新日程" title="刷新日程" onClick={refresh} disabled={loading}><RefreshCw size={16} className={loading ? common.spin : ''} /></button>
       </div>
-      <div className={s.calendarSummary}><span>{scheduled.length} 项日程{ongoing.length > 0 && ` · ${ongoing.length} 项跨期事项`}</span><span>北京时间 · UTC+8</span></div>
-      <div className={s.week} aria-label="每周活动" aria-busy={loading}>
-        {days.map((day, index) => {
-          const activities = scheduled.filter(activity => activityOnDate(activity, day));
-          return <section key={day} className={`${s.day} ${day === today ? s.today : ''}`} aria-label={`${day} ${weekdays[index]}`}>
-            <header><span>{weekdays[index]}</span><strong>{Number(day.slice(8))}</strong>{day === today && <small>今天</small>}</header>
-            <div className={s.dayEvents}>{activities.map(activityButton)}{activities.length === 0 && <span className={s.noActivity}>暂无活动</span>}</div>
-          </section>;
-        })}
-      </div>
-      {!loading && !scheduled.length && <p className={s.empty}><CalendarDays size={20} />{ongoing.length ? '本周暂无定时日程' : search || type || groupId ? '没有符合筛选条件的活动' : '本周暂无已提取的活动'}</p>}
+      {error && <p className={s.error} role="alert"><AlertCircle size={16} />{error}</p>}
+      <section id="daily-activities" className={s.dailySection} aria-label="当日活动" aria-busy={loading}>
+        <header className={s.dailyHeading}>
+          <div><h2>{shortDate(selectedDate)}<span>{weekday(selectedDate)}{selectedDate === today && ' · 今天'}</span></h2>
+            <p aria-live="polite">{loading ? '正在读取活动' : `${dailyActivities.length} 场活动`} · 北京时间</p></div>
+        </header>
+        <div className={s.tableScroll} tabIndex={0} role="region" aria-label="当日活动表格，可横向滚动">
+          <table className={s.activityTable} aria-label="当日活动列表">
+            <colgroup><col className={s.nameColumn} /><col className={s.timeColumn} /><col className={s.locationColumn} /><col /></colgroup>
+            <thead><tr><th scope="col">宣讲会 / 招聘会名称</th><th scope="col">时间</th><th scope="col">地点</th><th scope="col">原始消息</th></tr></thead>
+            <tbody>{!loading && dailyActivities.map(activity => <tr key={activity.id}>
+              <th scope="row"><span className={s.kind} data-kind={activity.type}>{activity.type}</span>
+                <button className={s.tableTitle} aria-label={`查看活动：${activity.title}`} onClick={() => void openDetail(activity)}>{activity.title}</button></th>
+              <td className={s.timeCell}>{activityTimeLabel(activity)}</td>
+              <td>{activity.location || '未定'}</td>
+              <td><CalendarMessage sources={page.sources?.[activity.id] ?? []} onOpen={openLink} /></td>
+            </tr>)}</tbody>
+          </table>
+          {(loading || !dailyActivities.length) && <div className={s.tableEmpty}>
+            {loading ? <LoaderCircle size={22} className={common.spin} /> : <CalendarDays size={24} />}
+            <strong>{loading ? '正在读取活动' : error ? '活动暂时无法加载' : search || type || groupId ? '没有符合筛选条件的活动' : '这一天暂无活动'}</strong>
+            {!loading && !error && <p>选择其他日期查看安排，或等待新消息提取完成。</p>}
+          </div>}
+        </div>
+      </section>
       {ongoing.length > 0 && <section className={s.ongoing} aria-label="跨期事项" aria-busy={loading}>
         <header><h2><CalendarRange size={16} />跨期事项</h2><span>{ongoing.length} 项</span></header>
         <div>{ongoing.map(activity => <button key={activity.id} className={s.periodRow} onClick={() => void openDetail(activity)} aria-label={`查看活动：${activity.title}`}>
