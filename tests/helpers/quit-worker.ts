@@ -3,8 +3,11 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { RuntimeManager } from '../../electron/core/runtime';
 import { macLoader, macLaunchArgs } from '../../electron/core/mac-loader';
+import { Store } from '../../electron/core/store';
 
 const root = process.argv[2];
+// Match the real worker's archive initialization before the main process opens schedules.
+const store = new Store(path.join(root, 'messages.sqlite'));
 const trace = path.join(root, 'quit-events.jsonl');
 const record = (event: string) => appendFileSync(trace, `${JSON.stringify(event)}\n`);
 const loader = path.join(root, 'loader.cjs');
@@ -38,6 +41,7 @@ process.parentPort.on('message', async ({ data }: { data: any }) => {
   if (data.type === 'shutdown') {
     record('shutdown-start');
     await runtime.stop();
+    store.close();
     record('runtime-stopped');
     // Keep cleanup pending long enough to exercise another OS quit request.
     setTimeout(() => { record('worker-exit'); process.exit(0); }, 500);

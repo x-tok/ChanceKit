@@ -1,7 +1,11 @@
 import { createServer } from 'vite';
 import { spawn } from 'node:child_process';
-import electron from 'electron';
+import { prepareElectron } from './electron-runtime.mjs';
 import './build.mjs';
+
+try { await prepareElectron(); }
+catch (error) { console.error(error.message); process.exit(1); }
+const { default: electron } = await import('electron');
 
 const server = await createServer({ server: { host: '127.0.0.1', port: 5178, strictPort: false } });
 await server.listen();

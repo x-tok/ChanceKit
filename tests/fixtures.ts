@@ -10,6 +10,7 @@ export const sample = (id: number, text: string, groupId = 731234567) => ({
 });
 export async function mockNapCat() {
   const calls: { action: string; params: any }[] = [];
+  const responses = new Map<string, (params: any) => unknown>();
   let loggedIn = true;
   let account = { user_id: 100010001, nickname: '见机测试账号' };
   const held = new Map<string, (reply: () => void) => void>();
@@ -40,6 +41,7 @@ export async function mockNapCat() {
         const hold = held.get(action);
         if (hold) { held.delete(action); hold(reply); } else reply();
       };
+      if (responses.has(action)) return ok(responses.get(action)!(params));
       if (action === 'get_login_info') return ok(account);
       if (action === 'get_group_list') return ok([
         { group_id: 731234567, group_name: '2027 届校园招聘信息交流（测试）', member_count: 387, max_member_count: 500 },
@@ -57,6 +59,8 @@ export async function mockNapCat() {
         ] });
       }
       if (action === 'get_forward_msg') return ok({ messages: [{ sender: { nickname: '就业中心（测试）' }, content: [{ type: 'text', data: { text: '转发招聘通知' } }] }] });
+      if (action === 'get_group_file_url') return ok({ url: 'https://example.com/notice.docx' });
+      if (action === 'get_image') return ok({ url: 'https://example.com/refreshed.png' });
       if (action === 'delayed') return setTimeout(() => ok(params), Number(params.delay));
       if (action === 'never') return;
       return socket.send(JSON.stringify({ status: 'failed', retcode: 1404, wording: 'Unknown action', echo }));
@@ -66,6 +70,7 @@ export async function mockNapCat() {
   const port = (server.address() as { port: number }).port;
   return {
     config: { wsUrl: `ws://127.0.0.1:${port}`, accessToken: 'test-onebot', webuiUrl: `http://127.0.0.1:${port}`, webuiToken: 'test-management' }, calls,
+    respond: (action: string, response: (params: any) => unknown) => { responses.set(action, response); },
     setLoggedIn: (value: boolean) => { loggedIn = value; },
     setAccount: (value: typeof account) => { account = value; },
     holdNext: (action: string) => {

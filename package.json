@@ -6,27 +6,44 @@
   "private": true,
   "type": "module",
   "main": "dist-electron/main.cjs",
-  "engines": { "node": ">=24.0.0" },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "prepare:napcat": "node scripts/napcat-bundle.mjs --download",
+    "prepare:electron": "node scripts/electron-runtime.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build && node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
+    "pretest:e2e": "npm run prepare:electron",
     "test:e2e": "playwright test",
+    "prestart": "npm run prepare:electron",
     "test:native:qq": "tsx --test tests/native/*.test.ts",
     "start": "electron .",
     "package": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@napi-rs/canvas": "1.0.9",
+    "acorn": "8.18.0",
     "extract-zip": "2.0.1",
+    "ipaddr.js": "2.5.0",
+    "jsqr": "1.4.0",
+    "linkedom": "0.18.13",
     "lucide-react": "^0.468.0",
+    "mammoth": "1.12.3",
+    "pdfjs-dist": "6.3.289",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "sharp": "0.35.4",
+    "typebox": "1.3.7",
     "ws": "^8.18.3",
+    "yauzl": "3.4.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {
@@ -43,20 +60,56 @@
     "esbuild": "^0.25.12",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
+    "undici": "7.29.1",
     "vite": "^7.2.2"
   },
   "build": {
     "appId": "app.chancekit",
     "productName": "见机",
     "artifactName": "ChanceKit-${version}-${os}-${arch}.${ext}",
-    "directories": { "output": "release" },
-    "files": ["dist/**", "dist-electron/**", "package.json"],
-    "extraResources": [{ "from": "resources/napcat", "to": "napcat", "filter": ["NapCat.Shell.zip", "manifest.json", "NOTICE.md"] }],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/napcat",
+        "to": "napcat",
+        "filter": [
+          "NapCat.Shell.zip",
+          "manifest.json",
+          "NOTICE.md"
+        ]
+      }
+    ],
     "beforePack": "scripts/before-pack.cjs",
     "icon": "build/icon.png",
     "asar": true,
-    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.productivity" },
-    "win": { "target": ["nsis"] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+    "asarUnpack": [
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*",
+      "node_modules/pdfjs-dist/**/*",
+      "node_modules/@napi-rs/**/*"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

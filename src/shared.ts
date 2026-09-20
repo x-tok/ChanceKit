@@ -37,13 +37,29 @@ export type Command =
   | { type: 'messages'; groupId: string; search: string; offset: number }
   | { type: 'export'; groupId: string }
   | { type: 'forward'; id: string };
-export type AppEvent = { type: 'state'; state: AppState } | { type: 'messages'; groupId: string };
+export type AppEvent = { type: 'state'; state: AppState } | { type: 'messages'; groupId: string } | { type: 'schedule' };
 export interface DesktopBridge {
   request<T = unknown>(command: Command): Promise<T>;
   subscribe(listener: (event: AppEvent) => void): () => void;
   chooseQQ(): Promise<string | null>;
   exportMessages(groupId: string): Promise<boolean>;
   openExternal(url: string): Promise<void>;
+  openWebpagePdf(messageKey: string, snapshotId: string): Promise<void>;
   savedConnection(): Promise<Partial<ConnectionConfig>>;
+  modelCatalog(): Promise<ModelProviderEntry[]>;
+  modelSettings(): Promise<ModelSettings>;
+  saveModelSettings(input: ModelConfigInput): Promise<ModelSettings>;
+  clearModelSettings(): Promise<ModelSettings>;
+  testModelSettings(input: ModelConfigInput): Promise<ModelTestResult>;
+  cancelModelTest(): Promise<void>;
+  schedule(query: ScheduleQuery): Promise<SchedulePage>;
+  activity(id: string): Promise<ActivityDetail | null>;
+  recruitingInformation(query: InformationQuery): Promise<InformationPage>;
+  informationDetail(messageKey: string): Promise<InformationDetail | null>;
+  processingStatus(): Promise<ProcessingStatus>;
+  configureProcessing(value: { enabled: boolean; concurrency: number }): Promise<ProcessingStatus>;
+  retryProcessing(messageKey?: string): Promise<ProcessingStatus>;
 }
 declare global { interface Window { desktop?: DesktopBridge } }
+import type { ModelConfigInput, ModelProviderEntry, ModelSettings, ModelTestResult } from './model-config';
+import type { ActivityDetail, InformationDetail, InformationPage, InformationQuery, ProcessingStatus, SchedulePage, ScheduleQuery } from './schedule';

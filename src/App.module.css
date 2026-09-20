@@ -233,8 +233,8 @@
   .brandSubtitle { order: 1; flex-basis: 100%; margin-top: 0; }
   .brand small, .navBottom { display: none; }
   .brandMark { width: 29px; height: 29px; border: none; }
-  .navigation nav { display: flex; margin-left: auto; gap: 4px; }
-  .navigation nav button { min-height: 40px; padding: 8px 11px; gap: 7px; font-size: 12px; }
+  .navigation nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; order: 2; gap: 4px; }
+  .navigation nav button { min-height: 40px; padding: 8px 5px; gap: 5px; font-size: 12px; justify-content: center; }
   .navigation nav small { display: none; }
   .main { flex: 1; }
   .topbar { min-height: 49px; padding: 0 18px; }
@@ -274,7 +274,8 @@
 @media (max-width: 360px) {
   .navigation { padding: 10px; gap: 6px; }
   .brandMark { display: none; }
-  .navigation nav button { padding: 8px 9px; }
+  .navigation nav button { padding: 8px 3px; font-size: 11px; gap: 3px; }
+  .navigation nav button svg { width: 15px; height: 15px; }
   .connectionPage { padding: 24px 16px; }
   .readerActions > .iconButton { width: 34px; }
   .messageRow > .avatar { width: 28px; height: 28px; }

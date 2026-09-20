@@ -1,6 +1,6 @@
 import { test, expect, _electron as electron } from '@playwright/test';
 import { build } from 'esbuild';
-import { mkdtemp, mkdir, readFile, rm, cp } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, cp, symlink } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
@@ -18,8 +18,10 @@ test('macOS system quit waits for the managed runtime and worker to exit, includ
   try {
     await mkdir(profile);
     await cp('dist', path.join(root, 'dist'), { recursive: true });
+    await symlink(path.resolve('node_modules'), path.join(root, 'node_modules'), 'dir');
     await build({ entryPoints: ['electron/main.ts', 'electron/preload.ts'], outdir: path.join(root, 'dist-electron'),
-      outExtension: { '.js': '.cjs' }, bundle: true, platform: 'node', format: 'cjs', target: 'node24', external: ['electron'] });
+      outExtension: { '.js': '.cjs' }, bundle: true, platform: 'node', format: 'cjs', target: 'node24',
+      external: ['electron', 'sharp', 'pdfjs-dist', '@napi-rs/canvas'] });
     await build({ entryPoints: ['tests/helpers/quit-worker.ts'], outfile: path.join(root, 'dist-electron/worker.cjs'),
       bundle: true, platform: 'node', format: 'cjs', target: 'node24', external: ['electron'] });
     const app = await electron.launch({ args: [path.join(root, 'dist-electron/main.cjs')], env: {
