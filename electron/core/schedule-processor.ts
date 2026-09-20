@@ -3,6 +3,7 @@ import { isLocalModelEndpoint } from '../../src/model-config';
 import type { StoredModelSettings } from './model-settings';
 import type { ExtractionResult, ProcessingJob } from './schedule-store';
 import { ScheduleStore } from './schedule-store';
+import { ExtractionFailure } from './extraction-failure';
 
 type Runner = (job: ProcessingJob, settings: StoredModelSettings, signal: AbortSignal) => Promise<ExtractionResult>;
 
@@ -105,11 +106,11 @@ export class ScheduleProcessor {
           try {
             controller.signal.throwIfAborted();
             const result = await this.run(job, settings!, controller.signal);
-            if (controller.signal.aborted || generation !== this.generation) this.store.release(job);
+            if (controller.signal.aborted || generation !== this.generation || !this.store.isCurrent(job)) this.store.release(job);
             else if (!this.store.complete(job, result)) this.store.release(job);
           } catch (error) {
-            if (controller.signal.aborted || generation !== this.generation) this.store.release(job);
-            else this.store.fail(job, error instanceof Error ? error.message : '消息处理失败。');
+            if (controller.signal.aborted || generation !== this.generation || !this.store.isCurrent(job)) this.store.release(job);
+            else this.store.fail(job, error instanceof Error ? error.message : '消息处理失败。', Date.now(), error instanceof ExtractionFailure ? error.materials : []);
           } finally {
             this.running.delete(job.message.key);
             if (!this.closed) { this.publish(); this.wake(); }

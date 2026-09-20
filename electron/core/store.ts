@@ -41,6 +41,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS groups (account_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, members INTEGER NOT NULL, max_members INTEGER NOT NULL, followed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(account_id, id));
       CREATE TABLE IF NOT EXISTS messages (key TEXT PRIMARY KEY, account_id TEXT NOT NULL, group_id TEXT NOT NULL, time INTEGER NOT NULL, text TEXT NOT NULL, payload TEXT NOT NULL, content_hash TEXT NOT NULL DEFAULT '');
       CREATE INDEX IF NOT EXISTS messages_group_time ON messages(account_id, group_id, time DESC, key DESC);
+      CREATE INDEX IF NOT EXISTS messages_external_id ON messages(account_id,group_id,CAST(json_extract(payload,'$.externalId') AS TEXT));
     `);
     if (!this.db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'content_hash')) {
       this.db.exec("ALTER TABLE messages ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''");

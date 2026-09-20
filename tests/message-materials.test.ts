@@ -167,7 +167,7 @@ test('documents enforce size, format, cancellation and decompression limits with
   const result = await collectMessageMaterials(message([{ type: 'file', data: { file: '/etc/passwd', file_id: 'opaque-id' } }]), signal(), true, undefined,
     async () => { resolved = true; return 'https://example.com/private'; });
   assert.equal(resolved, false);
-  assert.ok(result.warnings.some(warning => warning.includes('文件格式')));
+  assert.ok(result.warnings.some(warning => warning.includes('格式暂不支持')));
 });
 
 test('animation contact sheets contain later frames without a blanket first-frame warning', async () => {
@@ -226,4 +226,53 @@ test('a transient challenge gets one controlled retry, while persistent challeng
   assert.equal(calls, 2);
   assert.deepEqual(result.warnings, []);
   assert.match(result.text, /活动中心201/);
+});
+
+test('hash-based source routes survive extraction but are stripped only for HTTP downloads', async () => {
+  const url = 'https://example.com/#/position/campus/';
+  assert.deepEqual(linksInSourceText(`投递 ${url}`), [url]);
+  const page = parseMaterialPage('<html><body><article><a href="#/position/campus/">投递</a></article></body></html>', 'https://example.com/');
+  assert.deepEqual(page.links, [url]);
+  await downloadPublicMaterial(url, signal(), async input => {
+    assert.equal(String(input), 'https://example.com/');
+    return new HttpResponse('ok', { headers: { 'content-type': 'text/plain' } });
+  });
+});
+
+test('source budgets cover more than 48 images and prevent early long posters from starving later sources', async () => {
+  const long = await sharp({ create: { width: 120, height: 16000, channels: 3, background: '#778844' } }).png().toBuffer();
+  const seen: string[] = [];
+  const result = await collectMessageMaterials(textMessage('https://example.com/many'), signal(), true, async url => {
+    seen.push(url);
+    if (url.endsWith('/many')) return { url, contentType: 'text/html', bytes: Buffer.from(`<html><body><article>${Array.from({ length: 55 }, (_, index) => `<img src="/${index}.png">`).join('')}</article></body></html>`) };
+    return { url, contentType: 'image/png', bytes: url.endsWith('/0.png') ? long : png };
+  });
+  assert.equal(result.imageGroups.length, 55);
+  assert.ok(seen.includes('https://example.com/54.png'));
+  assert.equal(result.imageGroups[0].images.length, 2);
+  assert.ok(result.images.length <= 128);
+  assert.match(result.warnings.join(' '), /来源图片 1.*抽读/);
+});
+
+test('bounded static posters and animations retain their last content and disclose sampling', async () => {
+  const red = await sharp({ create: { width: 120, height: 5000, channels: 3, background: '#ff0000' } })
+    .composite([{ input: await sharp({ create: { width: 120, height: 500, channels: 3, background: '#0000ff' } }).png().toBuffer(), top: 4500, left: 0 }]).png().toBuffer();
+  const poster = await normalizeMaterialImage(red, 2);
+  assert.equal(poster.truncated, true);
+  const tail = await sharp(Buffer.from(poster.images[1].data, 'base64')).raw().toBuffer({ resolveWithObject: true });
+  const lastPixel = tail.data.subarray(tail.data.length - tail.info.channels);
+  assert.ok(lastPixel[2] > 200 && lastPixel[0] < 20);
+
+  const frames = [0, 1, 2].map(channel => {
+    const raw = Buffer.alloc(1080 * 1200 * 3);
+    for (let index = channel; index < raw.length; index += 3) raw[index] = 255;
+    return raw;
+  });
+  const gif = await sharp(Buffer.concat(frames), { raw: { width: 1080, height: 3600, pageHeight: 1200, channels: 3 } }).gif({ delay: [100, 100, 100] }).toBuffer();
+  const animation = await normalizeMaterialImage(gif, 2);
+  assert.equal(animation.truncated, true);
+  assert.equal(animation.images.length, 2);
+  const last = await sharp(Buffer.from(animation.images[1].data, 'base64')).raw().toBuffer({ resolveWithObject: true });
+  const pixel = (10 * last.info.width + 10) * last.info.channels;
+  assert.ok(last.data[pixel + 2] > 200 && last.data[pixel] < 20);
 });

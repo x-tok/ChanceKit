@@ -35,7 +35,16 @@ export const activitySchema = z.object({
     ctx.addIssue({ code: 'custom', message: '结束时间不能早于开始时间。' });
   }
 });
-export const extractionSchema = z.object({ activities: z.array(activitySchema).max(20) }).strict();
+export const informationInputSchema = z.object({
+  title: z.string().trim().min(1).max(200), summary: z.string().trim().max(1000),
+}).strict();
+export const extractionSchema = z.object({
+  activities: z.array(activitySchema).max(20), information: informationInputSchema.nullable().optional(),
+}).strict();
+export const informationQuerySchema = z.object({
+  category: z.enum(['information', 'incomplete']), groupId: z.string().max(160).optional(),
+  search: z.string().max(300).optional(), offset: z.number().int().min(0).max(1_000_000).optional(),
+}).strict();
 export const scheduleQuerySchema = z.object({
   week: calendarDate, type: z.enum(activityTypes).optional(), groupId: z.string().max(160).optional(), search: z.string().max(300).optional(),
 }).strict();

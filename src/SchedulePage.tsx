@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, ArrowRight, Bot, CalendarDays, Check, Clock3, ExternalLink, LoaderCircle, MapPin, MessageCircle, RefreshCw, Search, Settings2, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Bot, CalendarDays, CalendarRange, Check, ChevronRight, Clock3, ExternalLink, LoaderCircle, MapPin, MessageCircle, RefreshCw, Search, Settings2, X } from 'lucide-react';
 import { bridge, isDesktop } from './bridge';
-import { activityOnDate, activityTypes, addDays, chinaToday, emptyProcessingStatus, weekStart, type Activity, type ActivityDetail, type ActivityType, type ProcessingStatus, type SchedulePage } from './schedule';
+import { activityOnDate, activityTypes, addDays, chinaToday, emptyProcessingStatus, isOngoingActivity, scheduleProcessingVersion, weekStart, type Activity, type ActivityDetail, type ActivityType, type ProcessingStatus, type SchedulePage } from './schedule';
 import type { AppState } from './shared';
 import s from './Schedule.module.css';
 import common from './App.module.css';
+import { RecruitingInformationPanel } from './RecruitingInformation';
+import { SourceMaterials } from './SourceMaterials';
 
 const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 const errorText = (error: unknown) => (error instanceof Error ? error.message : '操作失败，请重试。').replace(/^Error invoking remote method '[^']+': Error: /, '');
@@ -22,6 +24,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
+  const [showIncomplete, setShowIncomplete] = useState(0);
   const [selected, setSelected] = useState<ActivityDetail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailId, setDetailId] = useState('');
@@ -31,6 +34,9 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   const detailNumber = useRef(0);
   const today = chinaToday();
   const days = Array.from({ length: 7 }, (_, index) => addDays(week, index));
+  const scheduled = page.activities.filter(activity => !isOngoingActivity(activity));
+  const ongoing = page.activities.filter(isOngoingActivity).sort((a, b) =>
+    a.endDate!.localeCompare(b.endDate!) || a.startDate!.localeCompare(b.startDate!) || a.title.localeCompare(b.title, 'zh-CN'));
   const groups = state.groups.filter(group => group.followed);
   const accountId = state.localAccount?.id;
   const refresh = useCallback(() => setRevision(value => value + 1), []);
@@ -68,11 +74,12 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   const configure = (enabled: boolean, concurrency = status.concurrency) => action(async () => {
     setStatus(await bridge.configureProcessing({ enabled, concurrency }));
   });
-  const openDetail = async (activity: Activity) => {
+  const openDetail = async (activity: Activity | string) => {
     const ticket = ++detailNumber.current;
-    setDetailId(activity.id); setSelected(null); setDetailBusy(true); detail.current?.showModal();
+    const id = typeof activity === 'string' ? activity : activity.id;
+    setDetailId(id); setSelected(null); setDetailBusy(true); detail.current?.showModal();
     try {
-      const result = await bridge.activity(activity.id);
+      const result = await bridge.activity(id);
       if (ticket === detailNumber.current) setSelected(result);
     } catch (error) { if (ticket === detailNumber.current) setError(errorText(error)); }
     finally { if (ticket === detailNumber.current) setDetailBusy(false); }
@@ -97,7 +104,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
         </div>
         <div className={s.processingStats} role="status">
           <span>等待 <b>{status.pending}</b></span><span>处理中 <b>{status.running}</b></span><span>已完成 <b>{status.completed}</b></span>
-          <span className={status.partial + status.failed ? s.attention : ''}>待检查 <b>{status.partial + status.failed}</b></span>
+          <button className={s.incompleteLink} onClick={() => setShowIncomplete(value => value + 1)}>待补全 <b>{status.incompleteInformation ?? status.partial + status.failed}</b><ChevronRight size={12} /></button>
           <span className={s.groupCount}>{groups.length} 个关注群</span>
         </div>
         <details className={s.queueDetails}>
@@ -106,11 +113,12 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
             <button className={common.textButton} disabled={!isDesktop || busy || !status.partial && !status.failed} onClick={() => void action(async () => setStatus(await bridge.retryProcessing()))}><RefreshCw size={14} />重试未完成</button>
             <button className={common.textButton} onClick={onModels}><Bot size={14} />模型配置</button>
           </div>
-          {status.issues.length > 0 ? <ul className={s.issues}>{status.issues.map(issue => <li key={issue.messageKey}><div><strong>{issue.groupName}</strong><p>{issue.text || '非文字消息'}</p><span>{issue.error}</span></div><button className={common.iconButton} title="重试此消息" aria-label={`重试消息 ${issue.messageKey}`} disabled={busy} onClick={() => void action(async () => setStatus(await bridge.retryProcessing(issue.messageKey)))}><RefreshCw size={15} /></button></li>)}</ul>
+          {status.partial + status.failed > 0 ? <p className={s.muted}>未读全的消息已保留在下方“招聘资讯 → 待补全”，可查看来源并逐条重新读取。</p>
             : <p className={s.muted}>暂无异常记录</p>}
         </details>
       </section>
       {!isDesktop && <p className={s.banner}><AlertCircle size={16} />浏览器预览：没有本地群消息，处理与保存不可用。</p>}
+      {isDesktop && !loading && (status.processorVersion ?? 0) < scheduleProcessingVersion && <p className={s.banner}><RefreshCw size={16} />处理引擎已更新，请重启应用。旧记录会先在本机重新判断；自动处理开启时，仍未解决的记录会自动补处理一次。</p>}
       {status.blockedReason && isDesktop && <p className={s.banner}><AlertCircle size={16} />{status.blockedReason}<button className={common.textButton} onClick={onModels}>模型配置</button></p>}
       {error && <p className={s.error} role="alert"><AlertCircle size={16} />{error}</p>}
       <div className={s.calendarToolbar}>
@@ -128,18 +136,34 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
         <div className={s.search}><Search size={15} /><input aria-label="搜索活动" placeholder="搜索活动、单位或地点" value={search} onChange={event => setSearch(event.target.value)} maxLength={300} /></div>
         <button className={common.iconButton} aria-label="刷新日程" title="刷新日程" onClick={refresh} disabled={loading}><RefreshCw size={16} className={loading ? common.spin : ''} /></button>
       </div>
-      <div className={s.calendarSummary}><span>{page.activities.length} 项活动</span><span>北京时间 · UTC+8</span></div>
+      <div className={s.calendarSummary}><span>{scheduled.length} 项日程{ongoing.length > 0 && ` · ${ongoing.length} 项跨期事项`}</span><span>北京时间 · UTC+8</span></div>
       <div className={s.week} aria-label="每周活动" aria-busy={loading}>
         {days.map((day, index) => {
-          const activities = page.activities.filter(activity => activityOnDate(activity, day));
+          const activities = scheduled.filter(activity => activityOnDate(activity, day));
           return <section key={day} className={`${s.day} ${day === today ? s.today : ''}`} aria-label={`${day} ${weekdays[index]}`}>
             <header><span>{weekdays[index]}</span><strong>{Number(day.slice(8))}</strong>{day === today && <small>今天</small>}</header>
             <div className={s.dayEvents}>{activities.map(activityButton)}{activities.length === 0 && <span className={s.noActivity}>暂无活动</span>}</div>
           </section>;
         })}
       </div>
-      {!loading && !page.activities.length && <p className={s.empty}><CalendarDays size={20} />{search || type || groupId ? '没有符合筛选条件的活动' : '本周暂无已提取的活动'}</p>}
+      {!loading && !scheduled.length && <p className={s.empty}><CalendarDays size={20} />{ongoing.length ? '本周暂无定时日程' : search || type || groupId ? '没有符合筛选条件的活动' : '本周暂无已提取的活动'}</p>}
+      {ongoing.length > 0 && <section className={s.ongoing} aria-label="跨期事项" aria-busy={loading}>
+        <header><h2><CalendarRange size={16} />跨期事项</h2><span>{ongoing.length} 项</span></header>
+        <div>{ongoing.map(activity => <button key={activity.id} className={s.periodRow} onClick={() => void openDetail(activity)} aria-label={`查看活动：${activity.title}`}>
+          <span className={s.periodMain}>
+            <span className={s.activityTop}><span className={s.kind} data-kind={activity.type}>{activity.type}</span>{activity.needsReview && <AlertCircle size={13} aria-label="待核对" />}</span>
+            <strong>{activity.title}</strong>
+            <small>{activity.organizer || activity.groupNames[0]}{activity.sourceCount > 1 && ` · ${activity.sourceCount} 条来源`}</small>
+          </span>
+          <span className={s.periodDates}><CalendarRange size={15} /><span>{activity.startDate} 至 {activity.endDate}
+            {(activity.startTime || activity.endTime) && <small>{activity.startTime && `开始 ${activity.startTime}`}{activity.startTime && activity.endTime && ' · '}{activity.endTime && `结束 ${activity.endTime}`}</small>}
+          </span></span>
+          <ChevronRight size={16} className={s.periodArrow} aria-hidden="true" />
+        </button>)}</div>
+      </section>}
       {page.undated.length > 0 && <section className={s.undated} aria-label="日期待确认"><header><h2>日期待确认</h2><span>{page.undated.length} 项</span></header><div>{page.undated.map(activityButton)}</div></section>}
+      <RecruitingInformationPanel key={accountId || 'preview'} state={state} revision={revision} showIncomplete={showIncomplete}
+        processingEnabled={status.enabled} onChange={refresh} onGroup={onGroup} onActivity={id => void openDetail(id)} />
     </div>
     <dialog ref={consent} className={s.dialog}>
       <h2>开启自动处理？</h2>
@@ -153,7 +177,11 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
         <span className={s.kind} data-kind={selected.activity.type}>{selected.activity.type}</span><h2>{selected.activity.title}</h2>
         {selected.activity.needsReview && <p className={s.banner}><AlertCircle size={16} />部分信息待确认，请核对原始通知。</p>}
         <dl className={s.facts}>
-          <div><dt>时间</dt><dd>{selected.activity.startDate ?? '日期待确认'}{selected.activity.endDate && ` 至 ${selected.activity.endDate}`}<br />{selected.activity.startTime ?? '时间待确认'}{selected.activity.endTime && ` – ${selected.activity.endTime}`}<small>北京时间</small></dd></div>
+          <div><dt>{isOngoingActivity(selected.activity) ? '起止日期' : '时间'}</dt><dd>{selected.activity.startDate ?? '日期待确认'}{selected.activity.endDate && ` 至 ${selected.activity.endDate}`}
+            {isOngoingActivity(selected.activity)
+              ? (selected.activity.startTime || selected.activity.endTime) && <><br />{selected.activity.startTime && `开始 ${selected.activity.startTime}`}{selected.activity.startTime && selected.activity.endTime && ' · '}{selected.activity.endTime && `结束 ${selected.activity.endTime}`}</>
+              : <><br />{selected.activity.startTime ?? '时间待确认'}{selected.activity.endTime && ` – ${selected.activity.endTime}`}</>}
+            <small>北京时间</small></dd></div>
           <div><dt>地点</dt><dd>{selected.activity.location || '待确认'}</dd></div>
           <div><dt>主办单位</dt><dd>{selected.activity.organizer || '待确认'}</dd></div>
           <div><dt>面向对象</dt><dd>{selected.activity.audience || '未注明'}</dd></div>
@@ -165,10 +193,18 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
           <summary><MessageCircle size={14} />{source.groupName}</summary>
           <span className={s.sourceMeta}>{source.senderName} · {new Date(source.messageTime * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}</span>
           <blockquote>{source.evidence}</blockquote><pre>{source.text}</pre>
-          {source.warnings.map(warning => <p className={s.sourceWarning} key={warning}><AlertCircle size={13} />{warning}</p>)}
-          {source.materials.map((material, index) => material.url
-            ? <button className={common.textButton} key={`${material.url}-${index}`} onClick={() => openLink(material.url)}><ExternalLink size={13} />{material.kind === 'image' ? '查看来源图片' : material.title || (material.kind === 'file' ? '查看来源文件' : '查看来源网页')}</button>
-            : <span className={s.sourceMeta} key={`attachment-${index}`}>{material.title || 'QQ 消息附件'}</span>)}
+          {source.relatedMessages?.map(message => <details key={message.messageKey}>
+            <summary>{message.relation === 'quoted' ? '引用原消息' : '同一消息的相关回复'} · {message.senderName}</summary>
+            <span className={s.sourceMeta}>{new Date(message.messageTime * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}</span>
+            <pre>{message.text}</pre>
+          </details>)}
+          {(source.reviewReasons ?? source.warnings).map(reason => <p className={s.sourceWarning} key={reason}><AlertCircle size={13} />{reason}</p>)}
+          {source.reviewReasons !== undefined && source.warnings.length > 0 && <details className={s.readingNotes}>
+            <summary>材料读取记录 · {source.warnings.length}</summary>
+            <ul>{source.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
+          </details>}
+          <SourceMaterials materials={source.materials} onOpen={openLink}
+            onPdf={id => void action(() => bridge.openWebpagePdf(source.messageKey, id))} />
           <button className={common.textButton} onClick={() => { detail.current?.close(); onGroup(source.groupId); }}><MessageCircle size={14} />打开群聊</button>
         </details>)}</section>
       </> : detailId && <p className={s.empty}>该活动已更新或来源群已取消关注。</p>}

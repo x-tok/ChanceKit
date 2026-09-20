@@ -30,13 +30,49 @@ export interface ActivitySource {
   messageTime: number;
   text: string;
   evidence: string;
-  materials: { url: string; kind: 'page' | 'image' | 'file'; title?: string }[];
+  materials: { url: string; kind: 'page' | 'image' | 'file'; title?: string; snapshotId?: string;
+    pdfCoverage?: { totalPages: number; processedPages: number }; notices?: string[] }[];
   warnings: string[];
+  reviewReasons?: string[];
+  relatedMessages?: RelatedMessageSource[];
+}
+export interface RelatedMessageSource {
+  messageKey: string; text: string; messageTime: number; senderName: string; relation: 'quoted' | 'related-reply';
 }
 export interface ActivityDetail { activity: Activity; sources: ActivitySource[] }
+export interface RecruitingInformationInput { title: string; summary: string }
+export type InformationCategory = 'information' | 'incomplete';
+export interface RecruitingInformation extends RecruitingInformationInput {
+  messageKey: string;
+  groupId: string;
+  groupName: string;
+  messageTime: number;
+  category: InformationCategory;
+  processingState: 'pending' | 'running' | 'completed' | 'partial' | 'failed';
+}
+export interface InformationDetail {
+  item: RecruitingInformation;
+  text: string;
+  senderName: string;
+  materials: ActivitySource['materials'];
+  diagnostics: string[];
+  reason: string;
+  activityIds: string[];
+  relatedMessages?: RelatedMessageSource[];
+}
+export interface InformationQuery { category: InformationCategory; groupId?: string; search?: string; offset?: number }
+export interface InformationPage {
+  items: RecruitingInformation[];
+  total: number;
+  counts: Record<InformationCategory, number>;
+  hasMore: boolean;
+}
+export const emptyInformationPage: InformationPage = { items: [], total: 0, counts: { information: 0, incomplete: 0 }, hasMore: false };
 export interface ScheduleQuery { week: string; type?: ActivityType; groupId?: string; search?: string }
 export interface SchedulePage { activities: Activity[]; undated: Activity[] }
 export interface ProcessingStatus {
+  processorVersion?: number;
+  incompleteInformation?: number;
   enabled: boolean;
   concurrency: number;
   pending: number;
@@ -47,7 +83,9 @@ export interface ProcessingStatus {
   blockedReason?: string;
   issues: { messageKey: string; groupName: string; text: string; error: string; status: 'failed' | 'partial' }[];
 }
+export const scheduleProcessingVersion = 2;
 export const emptyProcessingStatus: ProcessingStatus = {
+  processorVersion: scheduleProcessingVersion,
   enabled: false, concurrency: 3, pending: 0, running: 0, completed: 0, partial: 0, failed: 0, issues: [],
 };
 
@@ -66,4 +104,8 @@ export function weekStart(date: string): string {
 }
 export function activityOnDate(activity: Activity, date: string): boolean {
   return Boolean(activity.startDate && activity.startDate <= date && (activity.endDate ?? activity.startDate) >= date);
+}
+
+export function isOngoingActivity(activity: ActivityInput): boolean {
+  return activity.type === '其他' && Boolean(activity.startDate && activity.endDate && activity.endDate > activity.startDate);
 }

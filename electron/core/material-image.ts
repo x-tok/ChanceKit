@@ -13,6 +13,11 @@ let cachedBytes = 0;
 const options = { limitInputPixels: 268_402_689, failOn: 'error' as const, pages: 1, sequentialRead: true };
 const qrCache = new Map<string, string[]>();
 
+function sampledIndices(count: number, limit: number): number[] {
+  const size = Math.min(count, Math.max(0, limit));
+  return Array.from({ length: size }, (_, index) => size === 1 ? 0 : Math.round(index * (count - 1) / (size - 1)));
+}
+
 async function jpeg(input: Sharp): Promise<ImageContent> {
   let data = await input.clone().jpeg({ quality: 82, chromaSubsampling: '4:2:0' }).toBuffer();
   if (data.length > 4 * 1024 * 1024) data = await input.jpeg({ quality: 75 }).toBuffer();
@@ -34,28 +39,32 @@ export async function normalizeMaterialImage(bytes: Uint8Array, limit: number, s
   const split = async (input: Sharp) => {
     const { data, info } = await input.rotate().flatten({ background: '#ffffff' })
       .resize({ width: 1600, withoutEnlargement: true }).raw().toBuffer({ resolveWithObject: true });
-    // Overlap adjacent tiles so a line of text crossing the boundary stays readable.
-    for (let top = 0; top < info.height; top += 2120) {
+    // Overlap tiles; if bounded, retain the tail as well as the head instead of dropping every later fact.
+    const count = Math.max(1, Math.ceil((info.height - 80) / 2120));
+    const selected = sampledIndices(count, limit - images.length);
+    if (selected.length < count) truncated = true;
+    for (const index of selected) {
       signal?.throwIfAborted();
-      if (images.length >= limit) { truncated = true; break; }
+      const top = index * 2120;
       images.push(await jpeg(sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
         .extract({ left: 0, top, width: info.width, height: Math.min(2200, info.height - top) })));
-      if (top + 2200 >= info.height) break;
     }
   };
   if (!animated) await split(sharp(bytes, options));
   else {
     const width = metadata.width!;
     const height = metadata.pageHeight ?? metadata.height!;
-    const frames = Math.min(metadata.pages!, 240, Math.max(1, Math.floor(80_000_000 / (width * height))));
-    truncated = frames < metadata.pages!;
-    const { data, info } = await sharp(bytes, { ...options, limitInputPixels: 80_000_000, pages: frames }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-    const frameBytes = width * height * info.channels;
     const seen = new Set<string>();
     const tileWidth = Math.min(width, width > 1000 ? 1592 : 792);
     const tileHeight = Math.max(1, Math.round(height * tileWidth / width));
     const columns = Math.max(1, Math.min(4, Math.floor(1600 / (tileWidth + 8))));
     const rows = Math.max(1, Math.floor(2200 / (tileHeight + 8)));
+    const capacity = tileHeight > 2200 ? Math.max(1, Math.floor(limit / Math.ceil(height / 2120))) : limit * columns * rows;
+    const frames = sampledIndices(metadata.pages!, Math.min(capacity, 240, Math.max(1, Math.floor(80_000_000 / (width * height)))));
+    truncated = frames.length < metadata.pages!;
+    const complete = !truncated
+      ? await sharp(bytes, { ...options, limitInputPixels: 80_000_000, pages: frames.length }).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+      : undefined;
     let cells: OverlayOptions[] = [];
     const flush = async () => {
       if (!cells.length) return;
@@ -64,10 +73,13 @@ export async function normalizeMaterialImage(bytes: Uint8Array, limit: number, s
       images.push(await jpeg(sheet));
       cells = [];
     };
-    // Read every frame within the decode budget; only byte-identical frames are removed.
-    for (let frame = 0; frame < frames; frame++) {
+    // Sparse reads cover the animation timeline without allocating all decoded frames at once.
+    for (const [index, frame] of frames.entries()) {
       signal?.throwIfAborted();
-      const raw = data.subarray(frame * frameBytes, (frame + 1) * frameBytes);
+      const frameBytes = width * height * (complete?.info.channels ?? 4);
+      const { data: raw, info } = complete
+        ? { data: complete.data.subarray(frame * frameBytes, (frame + 1) * frameBytes), info: complete.info }
+        : await sharp(bytes, { ...options, page: frame }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
       const hash = createHash('sha256').update(raw).digest('hex');
       if (seen.has(hash)) continue;
       seen.add(hash);
@@ -77,7 +89,7 @@ export async function normalizeMaterialImage(bytes: Uint8Array, limit: number, s
         cells.push({ input, left: (cells.length % columns) * (tileWidth + 8), top: Math.floor(cells.length / columns) * (tileHeight + 8) });
         if (cells.length === columns * rows) await flush();
       }
-      if (images.length >= limit && frame < frames - 1) { truncated = true; break; }
+      if (images.length >= limit && index < frames.length - 1) { truncated = true; break; }
     }
     await flush();
   }

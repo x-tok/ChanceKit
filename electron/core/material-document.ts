@@ -2,6 +2,7 @@ import yauzl from 'yauzl';
 import mammoth from 'mammoth';
 import type { Readable } from 'node:stream';
 import { readMaterialPage } from './material-page';
+import { readPdfMaterial } from './material-pdf';
 
 export type ResolvedAttachment = string | { url?: string; bytes?: Uint8Array };
 export type AttachmentResolver = (segmentIndex: number, signal: AbortSignal) => Promise<ResolvedAttachment>;
@@ -45,13 +46,15 @@ async function validateDocumentArchive(bytes: Uint8Array, signal: AbortSignal): 
 }
 
 export async function readDocumentMaterial(bytes: Uint8Array, name: string, signal: AbortSignal) {
+  if (signal.aborted) throw new Error('文件读取已取消。');
   if (bytes.byteLength > 5 * 1024 * 1024) throw new Error('文件超过 5 MB 读取上限。');
+  if (/\.pdf$/i.test(name)) return readPdfMaterial(bytes, signal);
   if (/\.(txt|md|csv)$/i.test(name)) {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     if (text.includes('\0')) throw new Error('文件不是可读取的文字。');
     return { text, images: [] as Uint8Array[], links: [] as string[], warnings: [] as string[] };
   }
-  if (!/\.docx$/i.test(name)) throw new Error('暂不支持此文件格式，可读取 DOCX、TXT、MD 和 CSV。');
+  if (!/\.docx$/i.test(name)) throw new Error('暂不支持此文件格式，可读取 PDF、DOCX、TXT、MD 和 CSV。');
   await validateDocumentArchive(bytes, signal);
   signal.throwIfAborted();
   const images: Uint8Array[] = [];

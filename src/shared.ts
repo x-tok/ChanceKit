@@ -44,6 +44,7 @@ export interface DesktopBridge {
   chooseQQ(): Promise<string | null>;
   exportMessages(groupId: string): Promise<boolean>;
   openExternal(url: string): Promise<void>;
+  openWebpagePdf(messageKey: string, snapshotId: string): Promise<void>;
   savedConnection(): Promise<Partial<ConnectionConfig>>;
   modelCatalog(): Promise<ModelProviderEntry[]>;
   modelSettings(): Promise<ModelSettings>;
@@ -53,10 +54,12 @@ export interface DesktopBridge {
   cancelModelTest(): Promise<void>;
   schedule(query: ScheduleQuery): Promise<SchedulePage>;
   activity(id: string): Promise<ActivityDetail | null>;
+  recruitingInformation(query: InformationQuery): Promise<InformationPage>;
+  informationDetail(messageKey: string): Promise<InformationDetail | null>;
   processingStatus(): Promise<ProcessingStatus>;
   configureProcessing(value: { enabled: boolean; concurrency: number }): Promise<ProcessingStatus>;
   retryProcessing(messageKey?: string): Promise<ProcessingStatus>;
 }
 declare global { interface Window { desktop?: DesktopBridge } }
 import type { ModelConfigInput, ModelProviderEntry, ModelSettings, ModelTestResult } from './model-config';
-import type { ActivityDetail, ProcessingStatus, SchedulePage, ScheduleQuery } from './schedule';
+import type { ActivityDetail, InformationDetail, InformationPage, InformationQuery, ProcessingStatus, SchedulePage, ScheduleQuery } from './schedule';

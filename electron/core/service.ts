@@ -3,7 +3,7 @@ import { createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { once } from 'node:events';
 import { finished } from 'node:stream/promises';
-import type { AppState, AppEvent, Command, ConnectionConfig, HistoryResult, Account } from '../../src/shared';
+import type { AppState, AppEvent, Command, ConnectionConfig, HistoryResult, Account, Message } from '../../src/shared';
 import { commandSchema, errorText, validateEndpoint } from './validation';
 import { Store, normalizeMessage } from './store';
 import { OneBot, OneBotActionError } from './onebot';
@@ -11,6 +11,7 @@ import { NapCatManagement } from './management';
 import { RuntimeManager, detectQQ } from './runtime';
 import type { AttachmentRequest, ResolvedAttachment } from './material-document';
 import { readManagedAttachment } from './attachment-file';
+import { replyIds, type ReplyRequest } from './message-references';
 
 export class AppService {
   readonly state: AppState = { phase: 'idle', detail: '尚未连接 QQ', groups: [], runtime: null, archived: 0, logs: [], historyBusy: false };
@@ -52,6 +53,31 @@ export class AppService {
   }
   private requireGroup(id: string) {
     if (!this.state.groups.some(group => group.id === id)) throw new Error('当前账号没有这个群聊。');
+  }
+  async resolveReply(input: ReplyRequest): Promise<Message> {
+    const bot = this.bot, generation = this.generation;
+    const from = this.store.message(input.accountId, input.messageKey);
+    const current = () => {
+      if (!bot || bot !== this.bot || generation !== this.generation || this.state.phase !== 'online'
+        || input.accountId !== this.state.account?.id || !from
+        || !this.state.groups.some(group => group.id === from.groupId && group.followed)) {
+        throw new Error('请连接引用所属账号并保持来源群已关注。');
+      }
+      const latest = this.store.message(input.accountId, input.messageKey);
+      if (!latest || !replyIds(latest).includes(input.replyId)) throw new Error('该编号不是原消息中的引用。');
+    };
+    current();
+    const raw = await bot!.call('get_msg', { message_id: input.replyId });
+    current();
+    if (String(raw?.message_id) !== input.replyId || String(raw?.group_id) !== from!.groupId
+      || (raw?.self_id !== undefined && String(raw.self_id) !== input.accountId)
+      || raw?.message_type !== 'group' || !Number.isFinite(raw?.time) || raw.time <= 0 || raw.time > from!.time
+      || !raw?.sender?.user_id || !Array.isArray(raw.message)) throw new Error('QQ 返回的引用消息与原群或编号不一致，未使用。');
+    const message = normalizeMessage(raw, input.accountId);
+    this.store.put([message]);
+    // Refresh archive counters without treating this scoped fetch as a new live-message event.
+    this.reloadLocal();
+    return message;
   }
 
   async resolveAttachment(input: AttachmentRequest): Promise<ResolvedAttachment> {
