@@ -10,7 +10,19 @@ import { NapCatManagement } from '../electron/core/management';
 import { validateEndpoint } from '../electron/core/validation';
 import { AppService } from '../electron/core/service';
 import { mockNapCat, sample } from './fixtures';
-import type { AppState } from '../src/shared';
+import type { AppState, HistoryResult, MessagePage } from '../src/shared';
+import { initialSyncWindow } from '../src/onboarding/initial-sync';
+
+test('Initial sync starts at midnight in Shanghai three calendar days earlier', () => {
+  assert.deepEqual(initialSyncWindow(new Date('2026-09-21T15:59:59Z')), {
+    date: '2026-09-18',
+    since: Date.parse('2026-09-18T00:00:00+08:00') / 1000,
+  });
+  assert.deepEqual(initialSyncWindow(new Date('2026-09-21T16:00:00Z')), {
+    date: '2026-09-19',
+    since: Date.parse('2026-09-19T00:00:00+08:00') / 1000,
+  });
+});
 
 test('OneBot correlates out-of-order replies and keeps group events separate', async () => {
   const fixture = await mockNapCat();
@@ -50,13 +62,16 @@ test('Storage deduplicates replay but preserves distinct messages and account bo
   const store = new Store(':memory:');
   try {
     const raw = sample(1, '同一条招聘信息');
+    const newer = sample(2, '同一条招聘信息');
     assert.equal(store.put([normalizeMessage(raw, 'a')]), 1);
     assert.equal(store.put([normalizeMessage({ ...raw, message_id: 777 }, 'a')]), 0);
-    assert.equal(store.put([normalizeMessage(sample(2, '同一条招聘信息'), 'a')]), 1);
+    assert.equal(store.put([normalizeMessage(newer, 'a')]), 1);
     assert.equal(store.put([normalizeMessage(raw, 'b')]), 1);
     assert.equal(store.messages('a', '731234567').total, 2);
     assert.equal(store.messages('b', '731234567').total, 1);
     assert.equal(store.messages('a', '731234567', "' OR 1=1").total, 0);
+    store.saveGroups('a', [{ group_id: 731234567, group_name: '活跃群' }]);
+    assert.equal(store.groups('a').find(group => group.id === '731234567')?.lastMessageAt, newer.time);
     store.saveGroups('a', [{ group_id: 1, group_name: 'A' }]);
     store.follow('a', '1', true);
     store.saveGroups('a', [{ group_id: 1, group_name: 'A renamed' }]);
@@ -189,6 +204,21 @@ test('End-to-end service: groups, paged history, live dedup, export, offline rea
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.equal(service.state.archived, 6);
   } finally { await service.close(); await fixture.close(); await rm(folder, { recursive: true, force: true }); }
+});
+
+test('Onboarding history sync archives only messages on or after its start boundary', async () => {
+  const fixture = await mockNapCat();
+  const store = new Store(':memory:');
+  const service = new AppService(os.tmpdir(), store, () => {});
+  try {
+    await service.request({ type: 'connect', config: fixture.config });
+    const since = sample(4, '').time;
+    const result = await service.request({ type: 'history', groupId: '731234567', older: false, since }) as HistoryResult;
+    assert.equal(result.added, 2);
+    assert.equal(result.reachedStart, true);
+    const page = await service.request({ type: 'messages', groupId: '731234567', search: '', offset: 0 }) as MessagePage;
+    assert.equal(page.total, 2);
+  } finally { await service.close(); await fixture.close(); }
 });
 
 test('Saved archives never appear as a logged-in account, including after cancelling pending login', async () => {

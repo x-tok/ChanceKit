@@ -6,7 +6,7 @@ export interface ConnectionConfig {
   webuiToken: string;
 }
 export interface Account { id: string; nickname: string }
-export interface Group { id: string; name: string; memberCount: number; maxMembers: number; followed: boolean; messageCount: number }
+export interface Group { id: string; name: string; memberCount: number; maxMembers: number; followed: boolean; messageCount: number; lastMessageAt?: number }
 export interface Segment { type: string; data: Record<string, unknown> }
 export interface Message {
   key: string; accountId: string; groupId: string; externalId: string; realSeq?: string;
@@ -22,7 +22,14 @@ export interface AppState {
   archived: number; lastEventAt?: number; logs: { time: number; text: string }[];
   historyBusy: boolean;
 }
-export interface HistoryResult { added: number; received: number; canContinue: boolean; boundary: 'more' | 'uncertain' | 'empty' }
+export interface HistoryResult {
+  added: number;
+  received: number;
+  canContinue: boolean;
+  boundary: 'more' | 'uncertain' | 'empty';
+  oldestTime?: number;
+  reachedStart?: boolean;
+}
 export interface MessagePage { messages: Message[]; total: number; hasMore: boolean }
 export type Command =
   | { type: 'state' }
@@ -33,12 +40,13 @@ export type Command =
   | { type: 'refreshQR' }
   | { type: 'refreshGroups' }
   | { type: 'follow'; groupId: string; followed: boolean }
-  | { type: 'history'; groupId: string; older: boolean }
+  | { type: 'history'; groupId: string; older: boolean; since?: number }
   | { type: 'messages'; groupId: string; search: string; offset: number }
   | { type: 'export'; groupId: string }
   | { type: 'forward'; id: string };
 export type AppEvent = { type: 'state'; state: AppState } | { type: 'messages'; groupId: string } | { type: 'schedule' };
 export interface DesktopBridge {
+  platform?: 'darwin' | 'win32' | 'linux';
   request<T = unknown>(command: Command): Promise<T>;
   subscribe(listener: (event: AppEvent) => void): () => void;
   chooseQQ(): Promise<string | null>;
@@ -46,6 +54,9 @@ export interface DesktopBridge {
   openExternal(url: string): Promise<void>;
   openWebpagePdf(messageKey: string, snapshotId: string): Promise<void>;
   savedConnection(): Promise<Partial<ConnectionConfig>>;
+  onboardingStatus?(): Promise<{ completed: boolean }>;
+  completeOnboarding?(accountId: string): Promise<void>;
+  openQQDownload?(): Promise<void>;
   modelCatalog(): Promise<ModelProviderEntry[]>;
   modelSettings(): Promise<ModelSettings>;
   saveModelSettings(input: ModelConfigInput): Promise<ModelSettings>;

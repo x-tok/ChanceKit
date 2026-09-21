@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { AppEvent, Command, DesktopBridge } from '../src/shared';
 
 const bridge: DesktopBridge = {
+  platform: process.platform as DesktopBridge['platform'],
   request: <T>(command: Command): Promise<T> => ipcRenderer.invoke('chancekit:request', command),
   subscribe(listener) {
     const handler = (_event: unknown, payload: AppEvent) => listener(payload);
@@ -13,6 +14,9 @@ const bridge: DesktopBridge = {
   openExternal: (url: string) => ipcRenderer.invoke('chancekit:open', url),
   openWebpagePdf: (messageKey, snapshotId) => ipcRenderer.invoke('chancekit:pdf:open', { messageKey, snapshotId }),
   savedConnection: () => ipcRenderer.invoke('chancekit:connection'),
+  onboardingStatus: () => ipcRenderer.invoke('chancekit:onboarding:get'),
+  completeOnboarding: accountId => ipcRenderer.invoke('chancekit:onboarding:complete', accountId),
+  openQQDownload: () => ipcRenderer.invoke('chancekit:qq:download'),
   modelCatalog: () => ipcRenderer.invoke('chancekit:models:catalog'),
   modelSettings: () => ipcRenderer.invoke('chancekit:models:get'),
   saveModelSettings: input => ipcRenderer.invoke('chancekit:models:save', input),

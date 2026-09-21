@@ -22,6 +22,8 @@ import { InformationTitleReader } from './core/information-titles';
 import { WebpagePdfStore } from './core/webpage-pdf';
 import { downloadPublicMaterial } from './core/message-materials';
 import { printWebpagePdf } from './webpage-pdf-printer';
+import { registerOnboardingIpc } from './onboarding/ipc';
+import { OnboardingStore } from './onboarding/store';
 
 app.setName(BRAND.name);
 const profile = process.env.CHANCEKIT_TEST_DATA ? path.resolve(process.env.CHANCEKIT_TEST_DATA)
@@ -88,6 +90,13 @@ app.whenReady().then(async () => {
   function verifySender(event: Electron.IpcMainInvokeEvent) {
     if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Untrusted IPC sender');
   }
+  registerOnboardingIpc({
+    ipcMain,
+    store: new OnboardingStore(root, Boolean(process.env.CHANCEKIT_TEST_DATA)),
+    platform: process.platform,
+    verifySender,
+    openExternal: url => shell.openExternal(url),
+  });
   const modelSettings = new ModelSettingsStore(root, {
     isEncryptionAvailable: () => safeStorage.isEncryptionAvailable()
       && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),

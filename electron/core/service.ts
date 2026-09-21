@@ -223,7 +223,7 @@ export class AppService {
       case 'follow':
         this.requireGroup(command.groupId);
         this.store.follow(this.accountId(), command.groupId, command.followed); this.reloadLocal(); return;
-      case 'history': this.requireGroup(command.groupId); return this.history(command.groupId, command.older);
+      case 'history': this.requireGroup(command.groupId); return this.history(command.groupId, command.older, command.since);
       case 'messages': this.requireGroup(command.groupId); return this.store.messages(this.accountId(), command.groupId, command.search, command.offset);
       case 'export': this.requireGroup(command.groupId); return this.export(command.groupId);
       case 'forward': {
@@ -351,7 +351,7 @@ export class AppService {
     return groups.filter(group => group?.group_id);
   }
 
-  private async history(groupId: string, older: boolean): Promise<HistoryResult> {
+  private async history(groupId: string, older: boolean, since?: number): Promise<HistoryResult> {
     if (!this.bot || this.state.phase !== 'online') throw new Error('请先连接 QQ，再获取消息记录。');
     if (this.state.historyBusy) throw new Error('正在读取消息，请等待当前批次完成。');
     const cursor = older ? this.cursors.get(groupId) : undefined;
@@ -366,18 +366,25 @@ export class AppService {
       if (!Array.isArray(result?.messages)) throw new Error('消息历史响应格式不正确。');
       const messages = result.messages.map((raw: any) => normalizeMessage(raw, accountId, groupId));
       messages.sort((a: any, b: any) => a.time - b.time || (a.realSeq && b.realSeq ? Number(BigInt(a.realSeq) - BigInt(b.realSeq)) : 0));
-      const added = this.store.put(messages);
+      const oldestTime = messages[0]?.time;
+      const archivedMessages = since === undefined ? messages : messages.filter((message: Message) => message.time >= since);
+      const added = this.store.put(archivedMessages);
       const next = messages[0]?.externalId;
       const canContinue = Boolean(next && next !== cursor);
-      if (next && (older || !this.cursors.has(groupId))) this.cursors.set(groupId, next);
+      if (next && (older || since !== undefined || !this.cursors.has(groupId))) this.cursors.set(groupId, next);
       this.reloadLocal();
       this.emit({ type: 'messages', groupId });
       this.log(`已读取 ${messages.length} 条群消息，新增 ${added} 条`);
-      return { added, received: messages.length, canContinue, boundary: messages.length === 0 ? 'empty' : canContinue ? 'more' : 'uncertain' };
+      return {
+        added, received: messages.length, canContinue,
+        boundary: messages.length === 0 ? 'empty' : canContinue ? 'more' : 'uncertain',
+        oldestTime,
+        reachedStart: since !== undefined && (messages.length === 0 || !canContinue || (oldestTime !== undefined && oldestTime <= since)),
+      };
     } catch (error) {
       if (error instanceof OneBotActionError && error.retcode === 1200 && /^消息.*不存在$/.test(error.wording)) {
         if (!older) this.cursors.delete(groupId);
-        return { added: 0, received: 0, canContinue: false, boundary: older ? 'uncertain' : 'empty' };
+        return { added: 0, received: 0, canContinue: false, boundary: older ? 'uncertain' : 'empty', reachedStart: since !== undefined };
       }
       throw new Error(`${errorText(error)} 未能确认更早历史的范围。`);
     } finally { if (ticket === this.historyGeneration) this.patch({ historyBusy: false }); }

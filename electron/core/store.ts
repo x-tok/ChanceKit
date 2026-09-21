@@ -67,8 +67,15 @@ export class Store {
     });
   }
   groups(accountId: string): Group[] {
-    return (this.db.prepare(`SELECT g.*, (SELECT count(*) FROM messages m WHERE m.account_id=g.account_id AND m.group_id=g.id) AS message_count FROM groups g WHERE account_id=? ORDER BY followed DESC, name`).all(accountId) as any[])
-      .map(g => ({ id: g.id, name: g.name, memberCount: g.members, maxMembers: g.max_members, followed: Boolean(g.followed), messageCount: g.message_count }));
+    return (this.db.prepare(`SELECT g.*,
+      (SELECT count(*) FROM messages m WHERE m.account_id=g.account_id AND m.group_id=g.id) AS message_count,
+      (SELECT max(time) FROM messages m WHERE m.account_id=g.account_id AND m.group_id=g.id) AS last_message_at
+      FROM groups g WHERE account_id=? ORDER BY followed DESC, name`).all(accountId) as any[])
+      .map(g => ({
+        id: g.id, name: g.name, memberCount: g.members, maxMembers: g.max_members,
+        followed: Boolean(g.followed), messageCount: g.message_count,
+        lastMessageAt: g.last_message_at === null ? undefined : Number(g.last_message_at),
+      }));
   }
   follow(accountId: string, groupId: string, followed: boolean) {
     this.db.prepare('UPDATE groups SET followed=? WHERE account_id=? AND id=?').run(Number(followed), accountId, groupId);

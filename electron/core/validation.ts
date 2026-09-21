@@ -12,7 +12,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('connect'), config: configSchema }),
   ...(['disconnect', 'refreshQR', 'refreshGroups'] as const).map(type => z.object({ type: z.literal(type) })),
   z.object({ type: z.literal('follow'), groupId: id, followed: z.boolean() }),
-  z.object({ type: z.literal('history'), groupId: id, older: z.boolean() }),
+  z.object({ type: z.literal('history'), groupId: id, older: z.boolean(), since: z.number().int().min(0).optional() }),
   z.object({ type: z.literal('messages'), groupId: id, search: z.string().max(500), offset: z.number().int().min(0).max(10_000_000) }),
   z.object({ type: z.literal('export'), groupId: id }),
   z.object({ type: z.literal('forward'), id }),
