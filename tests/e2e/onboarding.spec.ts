@@ -78,7 +78,7 @@ test('first-run onboarding completes QQ, DeepSeek and bounded group sync', async
     await page.getByRole('button', { name: '开始 QQ 登录' }).click();
     await expect(page.getByAltText('QQ 登录二维码')).toBeVisible();
     await page.evaluate(() => (window as unknown as { finishQQLogin(): void }).finishQQLogin());
-    await expect(page.getByRole('heading', { name: '选择需要整理的群聊' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '选择你想关注的群聊' })).toBeVisible();
     await expect(page.getByText('见机测试账号', { exact: true })).toBeVisible();
     await expect(page.getByText('QQ 号：100010001', { exact: true })).toBeVisible();
     await expect(page.locator('img[src*="q1.qlogo.cn"]').first()).toBeVisible();

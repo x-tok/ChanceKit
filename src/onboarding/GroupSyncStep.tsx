@@ -55,7 +55,7 @@ export function GroupSyncStep({ state, onBack, onComplete, onError }: { state: A
   };
   return <div className={`${s.stage} ${s.groupStage}`}>
     <button className={s.backButton} disabled={syncing} onClick={onBack}><ArrowLeft size={16} />返回</button>
-    <div className={s.stageIntro}><span className={s.eyebrow}>第 3 步，共 3 步</span><h1>{online ? '选择需要整理的群聊' : '登录用于同步的 QQ'}</h1><p>{online ? `首次同步会读取 ${cutoffLabel} 至今的消息，完成后自动停止连接。` : '使用手机 QQ 扫码确认。登录成功后即可选择群聊。'}</p></div>
+    <div className={s.stageIntro}><span className={s.eyebrow}>第 3 步，共 3 步</span><h1>{online ? '选择你想关注的群聊' : '登录用于同步的 QQ'}</h1><p>{online ? `首次同步会读取 ${cutoffLabel} 至今的消息，完成后自动停止连接。` : '使用手机 QQ 扫码确认。登录成功后即可选择群聊。'}</p></div>
     {!online ? <div className={s.loginArea}>
       <div className={`${s.qrFrame} ${qrImage ? s.qrReady : ''}`}>{qrImage ? <img src={qrImage} width={224} height={224} alt="QQ 登录二维码" /> : <div><QrCode size={54} /><span>{connectionBusy ? state.detail : '准备后显示二维码'}</span></div>}</div>
       <div className={s.loginActions}>

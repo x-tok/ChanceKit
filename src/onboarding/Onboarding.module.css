@@ -118,7 +118,7 @@
 .progress > span { color: var(--green); }
 .progress strong { font-size: 12px; font-weight: 600; }
 .progress p { margin-top: 3px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
-.billingNotice { display: inline-flex; align-items: flex-start; gap: 7px; color: #79571b !important; }
+.billingNotice { display: inline-flex; align-items: flex-start; gap: 7px; color: #79571b !important; font-weight: 600; }
 .billingNotice svg { margin-top: 1px; flex-shrink: 0; }
 .error { width: 100%; margin-top: 16px; padding: 11px 13px; border-radius: 6px; background: #fbefed; color: var(--danger); font-size: 12px; line-height: 1.7; }
 .spin { animation: spin 1s linear infinite; }
