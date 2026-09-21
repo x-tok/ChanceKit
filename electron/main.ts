@@ -10,8 +10,7 @@ import { resolveProfileDirectory } from './core/runtime/profile';
 import { ModelSettingsStore, modelConfigInputSchema } from './core/models/model-settings';
 import { getModelCatalog, testPiModel } from './core/models/pi-model';
 import { ScheduleStore } from './core/processing/schedule-store';
-import { ScheduleProcessor } from './core/processing/schedule-processor';
-import { extractActivities } from './core/processing/activity-agent';
+import { DailyScheduleProcessor, DailyScheduleStore, extractDailyActivities } from './core/processing/daily-extraction/index';
 import { informationQuerySchema, processingConfigSchema, scheduleQuerySchema } from './core/processing/activity-schema';
 import { emptyInformationPage } from '../src/schedule';
 import { z } from 'zod';
@@ -37,7 +36,8 @@ let shutdownComplete = false;
 let workerExited = false;
 let worker: Electron.UtilityProcess;
 let modelTest: AbortController | undefined;
-let processor: ScheduleProcessor | undefined;
+let processor: DailyScheduleProcessor | undefined;
+let scheduleStore: ScheduleStore | undefined;
 let titleReader: InformationTitleReader | undefined;
 let archiveAccountId = '';
 let followedSignature = '';
@@ -133,30 +133,29 @@ app.whenReady().then(async () => {
   await ready;
   const initial = await request<AppState>({ type: 'state' });
   archiveAccountId = initial.localAccount?.id ?? '';
-  const scheduleStore = new ScheduleStore(path.join(root, 'messages.sqlite'));
+  scheduleStore = new ScheduleStore(path.join(root, 'messages.sqlite'));
+  const dailyScheduleStore = new DailyScheduleStore(path.join(root, 'messages.sqlite'));
   const webpagePdfs = new WebpagePdfStore(path.join(root, 'webpage-pdfs'), printWebpagePdf);
   titleReader = new InformationTitleReader(scheduleStore.information, () => archiveAccountId,
     () => { if (!window?.isDestroyed()) window?.webContents.send('chancekit:event', { type: 'schedule' }); });
-  processor = new ScheduleProcessor(scheduleStore, () => modelSettings.saved(),
+  processor = new DailyScheduleProcessor(dailyScheduleStore, () => modelSettings.saved(),
     async (job, settings, signal) => {
       const attempted = new Set<string>();
-      for (let count = 0; count < 4; count++) {
+      for (let count = 0; count < 8; count++) {
         signal.throwIfAborted();
-        const missing = job.referenceGraph?.missing.find(item => !attempted.has(`${item.fromKey}:${item.id}`));
+        const missing = job.messages.flatMap(source => source.referenceGraph?.missing ?? [])
+          .find(item => !attempted.has(`${item.fromKey}:${item.id}`));
         if (!missing) break;
         attempted.add(`${missing.fromKey}:${missing.id}`);
-        try { await request({ type: 'resolveReply', accountId: job.message.accountId, messageKey: missing.fromKey, replyId: missing.id }, signal); }
+        try { await request({ type: 'resolveReply', accountId: job.accountId, messageKey: missing.fromKey, replyId: missing.id }, signal); }
         catch { signal.throwIfAborted(); }
-        if (!scheduleStore.refreshReferences(job)) throw new Error('原消息已更新，引用读取结果未采用。');
+        if (!dailyScheduleStore.refreshReferences(job)) throw new Error('当日消息已更新，引用读取结果未采用。');
       }
-      return extractActivities(job, settings, {
+      return extractDailyActivities(job, settings, {
         signal, fetch: (input, init) => net.fetch(input instanceof URL ? input.href : input, init),
-        readWebpagePdf: (input, signal, consumePages) => webpagePdfs.read(job.message.accountId, input, signal, consumePages),
-        resolveAttachment: (segmentIndex, signal) => request<ResolvedAttachment>({
-          type: 'resolveAttachment', accountId: job.message.accountId, messageKey: job.message.key, segmentIndex,
-        }, signal),
-        resolveReferencedAttachment: (messageKey, segmentIndex, signal) => request<ResolvedAttachment>({
-          type: 'resolveAttachment', accountId: job.message.accountId, messageKey, segmentIndex,
+        readWebpagePdf: (_messageKey, input, signal, consumePages) => webpagePdfs.read(job.accountId, input, signal, consumePages),
+        resolveAttachment: (messageKey, segmentIndex, signal) => request<ResolvedAttachment>({
+          type: 'resolveAttachment', accountId: job.accountId, messageKey, segmentIndex,
         }, signal),
       });
     },
@@ -165,25 +164,25 @@ app.whenReady().then(async () => {
   ipcMain.handle('chancekit:schedule:list', (event, input) => {
     verifySender(event);
     const query = scheduleQuerySchema.parse(input);
-    return archiveAccountId ? scheduleStore.page(archiveAccountId, query) : { activities: [], undated: [] };
+    return archiveAccountId ? scheduleStore!.page(archiveAccountId, query) : { activities: [], undated: [] };
   });
   ipcMain.handle('chancekit:schedule:detail', (event, input) => {
     verifySender(event);
     const id = z.string().regex(/^[a-f0-9]{64}$/).parse(input);
-    return archiveAccountId ? scheduleStore.detail(archiveAccountId, id) : null;
+    return archiveAccountId ? scheduleStore!.detail(archiveAccountId, id) : null;
   });
   ipcMain.handle('chancekit:schedule:status', event => { verifySender(event); return processor!.status(); });
   ipcMain.handle('chancekit:information:list', (event, input) => {
     verifySender(event);
     const query = informationQuerySchema.parse(input);
-    const page = archiveAccountId ? scheduleStore.information.page(archiveAccountId, query) : emptyInformationPage;
+    const page = archiveAccountId ? scheduleStore!.information.page(archiveAccountId, query) : emptyInformationPage;
     if (archiveAccountId) titleReader?.request(archiveAccountId, page.items.map(item => item.messageKey));
     return page;
   });
   ipcMain.handle('chancekit:information:detail', (event, input) => {
     verifySender(event);
     const key = z.string().regex(/^[a-f0-9]{64}$/).parse(input);
-    return archiveAccountId ? scheduleStore.information.detail(archiveAccountId, key) : null;
+    return archiveAccountId ? scheduleStore!.information.detail(archiveAccountId, key) : null;
   });
   ipcMain.handle('chancekit:pdf:open', async (event, input) => {
     verifySender(event);
@@ -191,11 +190,11 @@ app.whenReady().then(async () => {
       messageKey: z.string().regex(/^[a-f0-9]{64}$/), snapshotId: z.string().regex(/^[a-f0-9]{64}$/),
     }).strict().parse(input);
     const accountId = archiveAccountId;
-    if (!scheduleStore.hasSnapshot(accountId, messageKey, snapshotId)) throw new Error('PDF 不属于当前关注消息。');
+    if (!scheduleStore!.hasSnapshot(accountId, messageKey, snapshotId)) throw new Error('PDF 不属于当前关注消息。');
     let file: string;
     try { file = await webpagePdfs.file(accountId, snapshotId); }
     catch { throw new Error('PDF 快照已清理，请重新读取原消息。'); }
-    if (accountId !== archiveAccountId || !scheduleStore.hasSnapshot(accountId, messageKey, snapshotId)) throw new Error('PDF 来源或账号已变化。');
+    if (accountId !== archiveAccountId || !scheduleStore!.hasSnapshot(accountId, messageKey, snapshotId)) throw new Error('PDF 来源或账号已变化。');
     const error = await shell.openPath(file);
     if (error) throw new Error('PDF 打开失败，请检查系统 PDF 阅读器。');
   });
@@ -269,7 +268,7 @@ app.on('before-quit', event => {
   const timer = setTimeout(() => { worker.kill(); finish(); }, 10_000);
   worker.once('exit', finish);
   void (async () => {
-    try { await processor?.close(); }
+    try { await processor?.close(); scheduleStore?.close(); }
     finally {
       if (!shutdownComplete && !workerExited) worker.postMessage({ type: 'shutdown' });
     }

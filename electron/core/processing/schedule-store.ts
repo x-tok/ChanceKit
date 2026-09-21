@@ -52,6 +52,9 @@ export class ScheduleStore {
         PRIMARY KEY(activity_id,message_key)
       );
       CREATE INDEX IF NOT EXISTS activity_sources_message ON activity_sources(message_key);
+      CREATE TABLE IF NOT EXISTS activity_canonical (
+        activity_id TEXT PRIMARY KEY REFERENCES activities(id) ON DELETE CASCADE, payload TEXT NOT NULL
+      );
     `);
     const columns = this.db.prepare('PRAGMA table_info(schedule_jobs)').all().map(row => String(row.name));
     if (!columns.includes('diagnostics')) this.db.exec("ALTER TABLE schedule_jobs ADD COLUMN diagnostics TEXT NOT NULL DEFAULT '[]'");
@@ -212,6 +215,8 @@ export class ScheduleStore {
         const id = createHash('sha256').update(JSON.stringify(identity)).digest('hex');
         this.db.prepare(`INSERT INTO activities VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at`)
           .run(id, job.message.accountId, activity.startDate, activity.endDate, Date.now());
+        this.db.prepare(`INSERT INTO activity_canonical(activity_id,payload) VALUES(?,?)
+          ON CONFLICT(activity_id) DO UPDATE SET payload=excluded.payload`).run(id, JSON.stringify(activity));
         this.db.prepare('INSERT OR REPLACE INTO activity_sources VALUES(?,?,?)')
           .run(id, job.message.key, JSON.stringify({ activity, inputHash: job.hash, materials: result.materials, warnings: result.warnings, reviewReasons, relatedMessages: result.relatedMessages }));
       }
@@ -220,6 +225,7 @@ export class ScheduleStore {
         FROM activity_sources s WHERE s.activity_id=activities.id
       ) WHERE id IN (SELECT activity_id FROM activity_sources WHERE message_key=?)`).run(job.message.key);
       this.db.prepare('DELETE FROM activities WHERE NOT EXISTS(SELECT 1 FROM activity_sources s WHERE s.activity_id=activities.id)').run();
+      this.db.prepare('DELETE FROM activity_canonical WHERE NOT EXISTS(SELECT 1 FROM activities a WHERE a.id=activity_canonical.activity_id)').run();
       this.db.prepare("UPDATE schedule_jobs SET status=?,error=?,diagnostics=?,processing_version=?,updated_at=? WHERE message_key=?")
         .run(reviewReasons.length ? 'partial' : 'completed', reviewReasons.join('；').slice(0, 800),
           JSON.stringify(result.warnings), scheduleProcessingVersion, Date.now(), job.message.key);
@@ -277,10 +283,12 @@ export class ScheduleStore {
       };
     });
     const payload = JSON.parse(String(rows[0].payload));
+    const canonicalRow = this.db.prepare('SELECT payload FROM activity_canonical WHERE activity_id=?').get(id);
+    const activity = canonicalRow ? JSON.parse(String(canonicalRow.payload)) as ActivityInput : payload.activity as ActivityInput;
     return {
-      activity: { ...payload.activity, id, updatedAt: Number(rows[0].updated_at), sourceCount: sources.length,
+      activity: { ...activity, id, updatedAt: Number(rows[0].updated_at), sourceCount: sources.length,
         groupNames: [...new Set(sources.map(source => source.groupName))],
-        needsReview: !payload.activity.startDate || (!payload.activity.startTime && !isOngoingActivity(payload.activity))
+        needsReview: !activity.startDate || (!activity.startTime && !isOngoingActivity(activity))
           || sources.some(source => (source.reviewReasons ?? source.warnings).length > 0) },
       sources,
     };
