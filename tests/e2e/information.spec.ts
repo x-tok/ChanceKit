@@ -29,24 +29,36 @@ test('recruiting information keeps pushes and incomplete attachments, moves reco
     const body = JSON.parse(Buffer.concat(chunks).toString());
     const visual = body.tools[0].function.name === 'submit_visual_text';
     const user = body.messages.find((message: any) => message.role === 'user');
-    const input = visual ? {} : JSON.parse(typeof user.content === 'string' ? user.content : user.content.filter((part: any) => part.type === 'text').map((part: any) => part.text).join(''));
-    const quoted = input.currentMessage?.includes('引用地点补充');
+    const text = typeof user.content === 'string' ? user.content : user.content.filter((part: any) => part.type === 'text').map((part: any) => part.text).join('');
+    const input = visual ? {} : JSON.parse(text);
+    const quotedSource = input.sources?.find((source: any) => source.message?.includes('引用地点补充'));
+    const quoted = Boolean(quotedSource);
     if (quoted) {
-      expect(input.referencedMessages).toHaveLength(1);
-      expect(input.referencedMessages[0].text).toContain('明天14:00');
-      expect(input.referencedMessages[0].messageTime).toBe('2026-09-23 09:00:00');
-      expect(input.linkedContent).toContain('研发岗位说明');
+      expect(quotedSource.extractedContent).toContain('明天14:00');
+      expect(quotedSource.extractedContent).toContain('2026-09-23 09:00:00');
+      expect(quotedSource.extractedContent).toContain('研发岗位说明');
       quotedRequests++;
     }
-    const output = visual ? readingGroupCard ? { text: `${groupTitle}\n${groupSummary}`, unreadable: false }
+    const sources = input.sources ?? [];
+    const activitySources = sources.filter((source: any) => source.extractedContent?.includes(activity.title)).map((source: any) => source.source);
+    const output = visual ? readingGroupCard && /来源 5\b/.test(text) ? { text: `${groupTitle}\n${groupSummary}`, unreadable: false }
       : { text: recovered ? `${activity.title} ${activity.evidence}` : '', unreadable: !recovered }
-      : quoted ? { activities: [{ ...activity, title: '星海研究院宣讲会', evidence: '原消息：明天14:00；引用地点补充：实验楼201' }] }
-      : input.linkedContent?.includes(groupTitle) ? { activities: [], information: { title: groupTitle, summary: groupSummary } }
-      : input.linkedContent?.includes(activity.title) ? { activities: [activity] }
-      : { activities: [], information: input.currentMessage?.includes('学院推送') ? { title: '企业招聘岗位资讯', summary: '岗位职责与毕业生培养安排。' } : null };
+      : {
+        activities: [
+          ...(quoted ? [{ ...activity, title: '星海研究院宣讲会', evidence: '原消息：明天14:00；引用地点补充：实验楼201', sourceRefs: [quotedSource.source] }] : []),
+          ...(activitySources.length ? [{ ...activity, sourceRefs: activitySources }] : []),
+        ],
+        information: sources.flatMap((source: any) => source.extractedContent?.includes(groupTitle)
+          ? [{ sourceRef: source.source, title: groupTitle, summary: groupSummary }]
+          : source.message?.includes('学院推送')
+            ? [{ sourceRef: source.source, title: '企业招聘岗位资讯', summary: '岗位职责与毕业生培养安排。' }]
+            : source.message?.includes(ad.slice(0, 20))
+              ? [{ sourceRef: source.source, title: '星河银行校园招聘', summary: ad }]
+              : []),
+      };
     requests++;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    response.end(`data: ${JSON.stringify({ id: 'test', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: visual ? 'submit_visual_text' : 'submit_activities', arguments: JSON.stringify(output) } }] }, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`);
+    response.end(`data: ${JSON.stringify({ id: 'test', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: visual ? 'submit_visual_text' : 'submit_daily_activities', arguments: JSON.stringify(output) } }] }, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`);
   });
   endpoint.listen(0, '127.0.0.1'); await once(endpoint, 'listening');
   const baseUrl = `http://127.0.0.1:${(endpoint.address() as { port: number }).port}/v1`;
@@ -74,11 +86,10 @@ test('recruiting information keeps pushes and incomplete attachments, moves reco
     fixture.push({ ...sample(203, ''), message: [{ type: 'file', data: { name: '招聘附件.doc', file_id: 'synthetic-doc' } }] });
     fixture.push({ ...sample(204, ''), message: [{ type: 'image', data: { file: 'synthetic-poster.png' } }] });
     await page.getByRole('button', { name: '日程', exact: true }).click();
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(4);
+    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(1);
     await page.getByRole('switch', { name: '自动处理' }).click();
     await page.getByRole('button', { name: '开启处理', exact: true }).click();
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).partial).toBe(2);
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).completed).toBe(2);
+    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).partial).toBe(1);
     const panel = () => page.getByRole('region', { name: '招聘资讯', exact: true });
     await expect(panel().getByRole('button', { name: /^查看资讯：/ })).toHaveCount(2);
     await page.getByLabel('跳转日期').fill('2030-01-07');

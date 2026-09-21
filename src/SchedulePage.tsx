@@ -109,7 +109,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
       <header className={s.heading}><div><span>活动与机会</span><h1>日程</h1></div><span className={s.agent}><Bot size={16} />pi agent</span></header>
       <section className={s.processing} aria-label="消息处理">
         <div className={s.processingMain}>
-          <div className={s.processingState}><span className={`${common.statusDot} ${status.enabled && !status.blockedReason ? common.liveDot : ''}`} /><strong>{status.blockedReason && status.enabled ? '等待模型配置' : status.enabled ? status.running ? '正在提取活动' : '自动处理已开启' : '自动处理已暂停'}</strong></div>
+          <div className={s.processingState}><span className={`${common.statusDot} ${status.enabled && !status.blockedReason ? common.liveDot : ''}`} /><strong>{status.blockedReason && status.enabled ? '等待模型配置' : status.enabled ? status.running ? '正在整理当日消息' : '自动处理已开启' : '自动处理已暂停'}</strong></div>
           <label className={s.switchLabel}>自动处理<input aria-label="自动处理" type="checkbox" role="switch" checked={status.enabled} disabled={!isDesktop || busy || !accountId || (!groups.length && !status.enabled)}
             onChange={event => { if (event.target.checked) consent.current?.showModal(); else void configure(false); }} /></label>
         </div>
@@ -120,7 +120,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
         </div>
         <details className={s.queueDetails}>
           <summary><Settings2 size={14} />处理设置与记录</summary>
-          <div className={s.queueControls}><label>并发消息数<select aria-label="并发消息数" value={status.concurrency} disabled={!isDesktop || busy || !accountId} onChange={event => void configure(status.enabled, Number(event.target.value))}>{[1, 2, 3, 4, 5, 6].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+          <div className={s.queueControls}><label>并发处理天数<select aria-label="并发处理天数" value={status.concurrency} disabled={!isDesktop || busy || !accountId} onChange={event => void configure(status.enabled, Number(event.target.value))}>{[1, 2, 3, 4, 5, 6].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
             <button className={common.textButton} disabled={!isDesktop || busy || !status.partial && !status.failed} onClick={() => void action(async () => setStatus(await bridge.retryProcessing()))}><RefreshCw size={14} />重试未完成</button>
             <button className={common.textButton} onClick={onModels}><Bot size={14} />模型配置</button>
           </div>
@@ -148,9 +148,9 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
             aria-label={`${day} ${weekday(day)}${day === today ? ' 今天' : ''}`} aria-pressed={day === selectedDate}
             aria-current={day === today ? 'date' : undefined} aria-controls="daily-activities"
             onClick={() => setSelectedDate(day)}>
-            <span>{weekday(day)}</span><strong>{Number(day.slice(8))}</strong>
-            <small>{day === today ? '今天' : `${Number(day.slice(5, 7))}月`}</small>
-            <span className={s.dateCount}>{loading ? '·' : count ? `${count}场` : '无安排'}</span>
+            <span className={s.dateName}>{weekday(day)}{day === today && <small>今天</small>}</span>
+            <strong>{Number(day.slice(8))}<small>/{Number(day.slice(5, 7))}</small></strong>
+            <span className={s.dateCount}>{loading ? '·' : count ? `${count} 场` : '无安排'}</span>
           </button>;
         })}
       </div>
@@ -209,7 +209,8 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
       <p>处理结果保存在本机。暂停会取消正在处理的请求；已发出的请求仍可能计费。</p>
       <div className={s.dialogActions}><button className={common.secondaryButton} onClick={() => consent.current?.close()}>取消</button><button className={common.primaryButton} onClick={() => { consent.current?.close(); void configure(true); }}><Check size={16} />开启处理</button></div>
     </dialog>
-    <dialog ref={detail} className={`${s.dialog} ${s.detail}`} onClose={() => { detailNumber.current++; setDetailId(''); }}>
+    <dialog ref={detail} className={`${s.dialog} ${s.detail}`} onClick={event => { if (event.target === detail.current) detail.current?.close(); }}
+      onClose={() => { detailNumber.current++; setDetailId(''); }}>
       <div className={s.detailHeading}><span className={s.muted}>活动详情</span><button className={common.iconButton} title="关闭活动详情" aria-label="关闭活动详情" onClick={() => detail.current?.close()}><X size={19} /></button></div>
       {detailBusy ? <p className={s.empty}><LoaderCircle size={22} className={common.spin} />正在读取</p> : selected ? <>
         <span className={s.kind} data-kind={selected.activity.type}>{selected.activity.type}</span><h2>{selected.activity.title}</h2>
@@ -227,7 +228,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
         </dl>
         {selected.activity.description && <p className={s.description}>{selected.activity.description}</p>}
         {selected.activity.registrationUrl && <button className={common.secondaryButton} onClick={() => openLink(selected.activity.registrationUrl!)}><ExternalLink size={15} />报名入口</button>}
-        <section className={s.sources}><h3>消息来源 · {selected.sources.length}</h3>{selected.sources.map(source => <details key={source.messageKey} open={selected.sources.length === 1}>
+        <section className={s.sources}><h3>完整原始信息 · {selected.sources.length} 条</h3>{selected.sources.map(source => <details key={source.messageKey} open={selected.sources.length === 1}>
           <summary><MessageCircle size={14} />{source.groupName}</summary>
           <span className={s.sourceMeta}>{source.senderName} · {new Date(source.messageTime * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}</span>
           <blockquote>{source.evidence}</blockquote><pre>{source.text}</pre>
@@ -238,7 +239,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
           </details>)}
           {(source.reviewReasons ?? source.warnings).map(reason => <p className={s.sourceWarning} key={reason}><AlertCircle size={13} />{reason}</p>)}
           {source.reviewReasons !== undefined && source.warnings.length > 0 && <details className={s.readingNotes}>
-            <summary>材料读取记录 · {source.warnings.length}</summary>
+            <summary>来源阅读说明 · {source.warnings.length}</summary>
             <ul>{source.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
           </details>}
           <SourceMaterials materials={source.materials} onOpen={openLink}
