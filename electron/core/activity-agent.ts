@@ -51,6 +51,7 @@ The preceding messages are context only: do not extract events only present ther
 Read supplied images for poster text as well as supplied webpage text. Use Chinese for output.
 Dates use Asia/Shanghai. Resolve relative dates against CURRENT MESSAGE TIME, never today's system date.
 If the year, date or time cannot be confidently determined, set it to null. Do not invent a time, company, address, deadline or URL.
+Keep startTime and endTime independent: preserve a known start with endTime null, or a known end with startTime null. Never output display placeholders such as "未定" inside date/time fields. The application renders unknown values and attaches the archived original message separately.
 A notice may contain multiple activities. Split distinct sessions. Do not duplicate the same activity within a message.
 Unknown text fields are empty strings. Dates and times are ISO date / 24-hour HH:mm. Keep registration deadlines separate from session dates; explicit multiday application windows use the ongoing-item rule below.
 Quote short evidence for each activity and its date/time. Use only registration URLs present in supplied source material.

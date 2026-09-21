@@ -8,7 +8,7 @@ import { Store, normalizeMessage } from '../electron/core/store';
 import { ScheduleStore, type ExtractionResult } from '../electron/core/schedule-store';
 import { ScheduleProcessor } from '../electron/core/schedule-processor';
 import { activitySchema } from '../electron/core/activity-schema';
-import { activityTypes, addDays, chinaToday, isOngoingActivity, scheduleProcessingVersion, weekStart, type ActivityInput } from '../src/schedule';
+import { activityTimeLabel, activityTypes, addDays, calendarWindowStart, chinaToday, isOngoingActivity, scheduleProcessingVersion, weekStart, type ActivityInput } from '../src/schedule';
 import { defaultModelConfig } from '../src/model-config';
 import { sample } from './fixtures';
 
@@ -132,6 +132,42 @@ test('only multiday other activities are ongoing; named sessions, single dates a
   for (const dates of [{ startDate: null, endDate: null }, { startDate: '2026-09-09', endDate: null }, { startDate: '2026-09-09', endDate: '2026-09-09' }]) {
     assert.equal(isOngoingActivity({ ...window, ...dates }), false);
   }
+});
+
+test('centered date windows handle month/year bounds and structured times retain missing endpoints', () => {
+  assert.equal(calendarWindowStart('2026-09-21'), '2026-09-18');
+  assert.equal(calendarWindowStart('2027-01-01'), '2026-12-29');
+  assert.equal(calendarWindowStart('1970-01-01'), '1970-01-01');
+  assert.equal(calendarWindowStart('2100-12-31'), '2100-12-25');
+  for (const [startTime, endTime, label] of [
+    ['14:30', '16:00', '14:30–16:00'], ['14:30', null, '14:30'],
+    [null, '16:00', '未定–16:00'], [null, null, '未定'],
+  ]) {
+    const value = activitySchema.parse({ ...activityFixture, startTime, endTime });
+    assert.equal(activityTimeLabel(value), label);
+  }
+  assert.equal(activitySchema.safeParse({ ...activityFixture, startTime: '未定' }).success, false);
+});
+
+test('seven-day pages include readable original sources with the same account and group filters as activities', async t => {
+  const f = await fixture(t);
+  f.messages.follow('a', '731234568', true);
+  const messages = [normalizeMessage(sample(1, '原始通知：周四14:30宣讲'), 'a'),
+    normalizeMessage(sample(2, 'https://example.com/recruit#/campus', 731234568), 'a')];
+  f.messages.put(messages);
+  f.schedule.enqueue('a');
+  f.schedule.complete(f.schedule.claim('a')!, result());
+  f.schedule.complete(f.schedule.claim('a')!, result());
+  const page = f.schedule.page('a', { week: '2026-09-18' });
+  assert.equal(page.activities.length, 1);
+  const id = page.activities[0].id;
+  assert.deepEqual(new Set(page.sources![id].map(source => source.text)), new Set(messages.map(message => message.text)));
+  assert.ok(page.sources![id].every(source => !('raw' in source)));
+  assert.equal(f.schedule.page('a', { week: '2026-09-18', groupId: '731234567' }).sources![id].length, 1);
+  assert.deepEqual(f.schedule.page('b', { week: '2026-09-18' }).sources, {});
+  assert.deepEqual(f.schedule.page('a', { week: '2026-09-18', search: '不存在' }).sources, {});
+  f.messages.follow('a', '731234568', false);
+  assert.deepEqual(f.schedule.page('a', { week: '2026-09-18' }).sources![id].map(source => source.text), [messages[0].text]);
 });
 
 test('existing ongoing records retain weekly filters and sources without requiring clock times or suppressing real warnings', async t => {

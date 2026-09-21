@@ -247,12 +247,17 @@ export class ScheduleStore {
     const ids = this.db.prepare(`SELECT a.id FROM activities a WHERE a.account_id=? AND
       (a.start_date IS NULL OR (a.start_date<? AND coalesce(a.end_date,a.start_date)>=?)) ORDER BY a.start_date`)
       .all(accountId, addDays(query.week, 7), query.week);
-    const rows = ids.map(row => this.detail(accountId, String(row.id), query.groupId)?.activity).filter((row): row is Activity => Boolean(row));
+    const details = ids.map(row => this.detail(accountId, String(row.id), query.groupId)).filter((row): row is ActivityDetail => Boolean(row));
+    const rows = details.map(detail => detail.activity);
     const filtered = rows.filter(row => (!row.startDate || (row.startDate < addDays(query.week, 7) && (row.endDate ?? row.startDate) >= query.week))
       && (!query.type || row.type === query.type)
       && (!query.search || `${row.title} ${row.organizer} ${row.location} ${row.description}`.toLowerCase().includes(query.search.toLowerCase())));
     filtered.sort((a, b) => `${a.startDate ?? ''} ${a.startTime ?? '99:99'} ${a.title}`.localeCompare(`${b.startDate ?? ''} ${b.startTime ?? '99:99'} ${b.title}`));
-    return { activities: filtered.filter(row => row.startDate), undated: filtered.filter(row => !row.startDate) };
+    const visible = new Set(filtered.map(row => row.id));
+    return {
+      activities: filtered.filter(row => row.startDate), undated: filtered.filter(row => !row.startDate),
+      sources: Object.fromEntries(details.filter(detail => visible.has(detail.activity.id)).map(detail => [detail.activity.id, detail.sources])),
+    };
   }
   detail(accountId: string, id: string, groupId?: string): ActivityDetail | null {
     const rows = this.db.prepare(`SELECT s.payload,s.message_key,m.group_id,m.time,m.payload AS message,g.name,a.updated_at

@@ -69,7 +69,10 @@ export interface InformationPage {
 }
 export const emptyInformationPage: InformationPage = { items: [], total: 0, counts: { information: 0, incomplete: 0 }, hasMore: false };
 export interface ScheduleQuery { week: string; type?: ActivityType; groupId?: string; search?: string }
-export interface SchedulePage { activities: Activity[]; undated: Activity[] }
+export interface SchedulePage {
+  activities: Activity[]; undated: Activity[];
+  sources?: Record<string, ActivitySource[]>;
+}
 export interface ProcessingStatus {
   processorVersion?: number;
   incompleteInformation?: number;
@@ -101,6 +104,17 @@ export function addDays(date: string, days: number): string {
 export function weekStart(date: string): string {
   const day = new Date(`${date}T00:00:00Z`).getUTCDay();
   return addDays(date, -(day === 0 ? 6 : day - 1));
+}
+// The API's legacy "week" field is the first day of any seven-day window.
+export function calendarWindowStart(date: string): string {
+  const start = addDays(date, -3);
+  return start < '1970-01-01' ? '1970-01-01' : start > '2100-12-25' ? '2100-12-25' : start;
+}
+export function activityTimeLabel(activity: Pick<ActivityInput, 'startTime' | 'endTime'>): string {
+  if (activity.startTime && activity.endTime) return `${activity.startTime}–${activity.endTime}`;
+  if (activity.startTime) return activity.startTime;
+  if (activity.endTime) return `未定–${activity.endTime}`;
+  return '未定';
 }
 export function activityOnDate(activity: Activity, date: string): boolean {
   return Boolean(activity.startDate && activity.startDate <= date && (activity.endDate ?? activity.startDate) >= date);
