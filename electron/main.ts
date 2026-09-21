@@ -24,6 +24,7 @@ import { downloadPublicMaterial } from './core/message-materials';
 import { printWebpagePdf } from './webpage-pdf-printer';
 import { registerOnboardingIpc } from './onboarding/ipc';
 import { OnboardingStore } from './onboarding/store';
+import { applicationMenuTemplate } from './application-menu';
 
 app.setName(BRAND.name);
 const profile = process.env.CHANCEKIT_TEST_DATA ? path.resolve(process.env.CHANCEKIT_TEST_DATA)
@@ -242,11 +243,7 @@ app.whenReady().then(async () => {
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('不支持这个链接。');
     await shell.openExternal(url.href);
   });
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    ...(process.platform === 'darwin' ? [{ label: BRAND.name, submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] } as Electron.MenuItemConstructorOptions] : []),
-    { label: '编辑', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
-    { label: '窗口', submenu: [{ role: 'minimize' }, { role: 'close' }] },
-  ]));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(BRAND.name)));
   window = new BrowserWindow({ width: 1240, height: 820, minWidth: 900, minHeight: 640, backgroundColor: '#ffffff', title: BRAND.name, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
