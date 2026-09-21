@@ -4,10 +4,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import os from 'node:os';
-import { Store, normalizeMessage } from '../electron/core/store';
-import { ScheduleStore } from '../electron/core/schedule-store';
-import { readReferenceGraph, replyIds } from '../electron/core/message-references';
-import { AppService } from '../electron/core/service';
+import { Store, normalizeMessage } from '../electron/core/archive/store';
+import { ScheduleStore } from '../electron/core/processing/schedule-store';
+import { readReferenceGraph, replyIds } from '../electron/core/archive/message-references';
+import { AppService } from '../electron/core/application/service';
 import { mockNapCat, sample } from './fixtures';
 
 export const reply = (id: number, target: number, text: string, groupId = 731234567) => ({

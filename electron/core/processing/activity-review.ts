@@ -1,6 +1,6 @@
-import type { Message } from '../../src/shared';
-import { addDays, chinaToday, isOngoingActivity, type ActivityInput } from '../../src/schedule';
-import { linksInSourceText } from './material-links';
+import type { Message } from '../../../src/shared';
+import { addDays, chinaToday, isOngoingActivity, type ActivityInput } from '../../../src/schedule';
+import { linksInSourceText } from '../materials/material-links';
 
 const compact = (text: string) => text.normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
 const sessionWords = /宣讲|双选|招聘会|面试|笔试|讲座|直播|交流会/;

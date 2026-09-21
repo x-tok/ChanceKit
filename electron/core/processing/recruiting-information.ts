@@ -1,8 +1,8 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
-import type { Message } from '../../src/shared';
-import type { ActivitySource, InformationCategory, InformationDetail, InformationPage, InformationQuery, RecruitingInformation, RecruitingInformationInput, RelatedMessageSource } from '../../src/schedule';
-import { linksInSourceText, sourceLink } from './material-links';
-import { genericInformationTitle, linkOnlyMessage, readableTitle, shareCardMaterials } from './material-title';
+import type { Message } from '../../../src/shared';
+import type { ActivitySource, InformationCategory, InformationDetail, InformationPage, InformationQuery, RecruitingInformation, RecruitingInformationInput, RelatedMessageSource } from '../../../src/schedule';
+import { linksInSourceText, sourceLink } from '../materials/material-links';
+import { genericInformationTitle, linkOnlyMessage, readableTitle, shareCardMaterials } from '../materials/material-title';
 
 // This index preserves message provenance; it neither downloads sources nor calls a model.
 export function informationCandidate(message: Message): boolean {

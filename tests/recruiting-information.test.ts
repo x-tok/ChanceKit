@@ -4,9 +4,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
 import path from 'node:path';
-import { Store, normalizeMessage } from '../electron/core/store';
-import { ScheduleStore, type ExtractionResult } from '../electron/core/schedule-store';
-import { informationQuerySchema } from '../electron/core/activity-schema';
+import { Store, normalizeMessage } from '../electron/core/archive/store';
+import { ScheduleStore, type ExtractionResult } from '../electron/core/processing/schedule-store';
+import { informationQuerySchema } from '../electron/core/processing/activity-schema';
 import { sample } from './fixtures';
 
 const ad = '星河科技2027届校园招聘正式启动，多个技术岗位开放投递，面向理工科应届毕业生，欢迎从岗位入口投递简历 https://jobs.example.com/#/position/campus/';

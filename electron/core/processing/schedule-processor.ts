@@ -1,6 +1,6 @@
-import { emptyProcessingStatus, type ProcessingStatus } from '../../src/schedule';
-import { isLocalModelEndpoint } from '../../src/model-config';
-import type { StoredModelSettings } from './model-settings';
+import { emptyProcessingStatus, type ProcessingStatus } from '../../../src/schedule';
+import { isLocalModelEndpoint } from '../../../src/model-config';
+import type { StoredModelSettings } from '../models/model-settings';
 import type { ExtractionResult, ProcessingJob } from './schedule-store';
 import { ScheduleStore } from './schedule-store';
 import { ExtractionFailure } from './extraction-failure';

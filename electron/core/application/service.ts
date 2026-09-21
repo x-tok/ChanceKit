@@ -3,15 +3,15 @@ import { createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { once } from 'node:events';
 import { finished } from 'node:stream/promises';
-import type { AppState, AppEvent, Command, ConnectionConfig, HistoryResult, Account, Message } from '../../src/shared';
-import { commandSchema, errorText, validateEndpoint } from './validation';
-import { Store, normalizeMessage } from './store';
-import { OneBot, OneBotActionError } from './onebot';
-import { NapCatManagement } from './management';
-import { RuntimeManager, detectQQ } from './runtime';
-import type { AttachmentRequest, ResolvedAttachment } from './material-document';
-import { readManagedAttachment } from './attachment-file';
-import { replyIds, type ReplyRequest } from './message-references';
+import type { AppState, AppEvent, Command, ConnectionConfig, HistoryResult, Account, Message } from '../../../src/shared';
+import { commandSchema, errorText, validateEndpoint } from '../connection/validation';
+import { Store, normalizeMessage } from '../archive/store';
+import { OneBot, OneBotActionError } from '../connection/onebot';
+import { NapCatManagement } from '../connection/management';
+import { RuntimeManager, detectQQ } from '../runtime/runtime';
+import type { AttachmentRequest, ResolvedAttachment } from '../materials/material-document';
+import { readManagedAttachment } from '../archive/attachment-file';
+import { replyIds, type ReplyRequest } from '../archive/message-references';
 
 export class AppService {
   readonly state: AppState = { phase: 'idle', detail: '尚未连接 QQ', groups: [], runtime: null, archived: 0, logs: [], historyBusy: false };

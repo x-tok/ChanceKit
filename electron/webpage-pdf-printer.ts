@@ -1,8 +1,8 @@
 import { BrowserWindow } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { downloadPublicMaterial, publicMaterialUrl, type MaterialDownload } from './core/message-materials';
-import { readMaterialPage } from './core/material-page';
-import type { PrintedWebpagePdf } from './core/webpage-pdf';
+import { downloadPublicMaterial, publicMaterialUrl, type MaterialDownload } from './core/materials/message-materials';
+import { readMaterialPage } from './core/materials/material-page';
+import type { PrintedWebpagePdf } from './core/materials/webpage-pdf';
 
 // Chromium lays out the original document, not an article rebuilt from extracted images.
 export async function printWebpagePdf(url: string, signal: AbortSignal,

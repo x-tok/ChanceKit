@@ -8,8 +8,8 @@ import { readDocumentMaterial, type AttachmentResolver, type ResolvedAttachment 
 import { linksInSourceText } from './material-links';
 import type { ImageMaterialGroup } from './visual-materials';
 import type { ImageContent } from '@earendil-works/pi-ai';
-import type { Message } from '../../src/shared';
-import type { ActivitySource } from '../../src/schedule';
+import type { Message } from '../../../src/shared';
+import type { ActivitySource } from '../../../src/schedule';
 import { shareCardMaterials } from './material-title';
 import { shouldUseWebpagePdf, type WebpagePdfReader, type WebpagePdfRequest } from './webpage-pdf';
 import type { PdfPageImage } from './material-pdf';

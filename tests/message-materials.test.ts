@@ -4,11 +4,11 @@ import sharp from 'sharp';
 import JSZip from 'jszip';
 import QRCode from 'qrcode';
 import { Response as HttpResponse, type fetch as httpFetch } from 'undici';
-import { collectMessageMaterials, downloadPublicMaterial, parseMaterialPage, type MaterialDownload } from '../electron/core/message-materials';
-import { normalizeMaterialImage } from '../electron/core/material-image';
-import { readDocumentMaterial } from '../electron/core/material-document';
-import { linksInSourceText } from '../electron/core/material-links';
-import { normalizeMessage } from '../electron/core/store';
+import { collectMessageMaterials, downloadPublicMaterial, parseMaterialPage, type MaterialDownload } from '../electron/core/materials/message-materials';
+import { normalizeMaterialImage } from '../electron/core/materials/material-image';
+import { readDocumentMaterial } from '../electron/core/materials/material-document';
+import { linksInSourceText } from '../electron/core/materials/material-links';
+import { normalizeMessage } from '../electron/core/archive/store';
 import { sample } from './fixtures';
 
 const signal = () => new AbortController().signal;

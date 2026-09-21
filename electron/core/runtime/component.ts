@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import extract from 'extract-zip';
-import manifest from '../../resources/napcat/manifest.json';
+import manifest from '../../../resources/napcat/manifest.json';
 import { runtimeFs, runtimeFiles, runtimePathExists, discardRuntimePath, recoverRuntimeDirectory, replaceRuntimeDirectory } from './runtime-files';
 
 const { createReadStream } = runtimeFs;

@@ -1,5 +1,5 @@
-import { downloadPublicMaterial, parseMaterialPage, publicMaterialUrl, type MaterialDownload } from './message-materials';
-import { readableTitle } from './material-title';
+import { downloadPublicMaterial, parseMaterialPage, publicMaterialUrl, type MaterialDownload } from '../materials/message-materials';
+import { readableTitle } from '../materials/material-title';
 import type { RecruitingInformationStore } from './recruiting-information';
 
 export async function readArticleTitle(url: string, signal: AbortSignal, download: MaterialDownload = downloadPublicMaterial): Promise<string | undefined> {

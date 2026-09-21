@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
-import { RuntimeManager } from '../electron/core/runtime';
+import { RuntimeManager } from '../electron/core/runtime/runtime';
 
 async function fixture(mode = '') {
   const child = spawn(process.execPath, ['tests/helpers/qq-exit-fixture.mjs', mode], {

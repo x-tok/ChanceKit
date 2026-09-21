@@ -6,9 +6,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { installBundledNapCat } from './component';
 import { macLoader, macQuitCommand, macLaunchArgs } from './mac-loader';
-import { OneBot } from './onebot';
+import { OneBot } from '../connection/onebot';
 import { runtimeFiles, runtimePathExists, discardRuntimePath, recoverRuntimeDirectory, replaceRuntimeDirectory } from './runtime-files';
-import type { ConnectionConfig, QQInstallation } from '../../src/shared';
+import type { ConnectionConfig, QQInstallation } from '../../../src/shared';
 
 const exec = promisify(execFile);
 const { mkdir, mkdtemp, readFile, writeFile, readdir, stat } = runtimeFiles;

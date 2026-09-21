@@ -13,7 +13,7 @@ import { moonshotaiCnProvider } from '@earendil-works/pi-ai/providers/moonshotai
 import { minimaxCnProvider } from '@earendil-works/pi-ai/providers/minimax-cn';
 import { qwenTokenPlanCnProvider } from '@earendil-works/pi-ai/providers/qwen-token-plan-cn';
 import { zaiCodingCnProvider } from '@earendil-works/pi-ai/providers/zai-coding-cn';
-import { isLocalModelEndpoint, modelProviderPresets, type ModelApi, type ModelProvider, type ModelProviderEntry, type ModelTestResult } from '../../src/model-config';
+import { isLocalModelEndpoint, modelProviderPresets, type ModelApi, type ModelProvider, type ModelProviderEntry, type ModelTestResult } from '../../../src/model-config';
 import { modelConfigInputSchema, type ModelSettingsStore, type StoredModelSettings } from './model-settings';
 
 const catalogs = {

@@ -2,8 +2,8 @@ import { readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
-import { modelApis, modelProviders, sameCredentialScope, type ModelConfigInput, type ModelSettings } from '../../src/model-config';
-import { validateEndpoint } from './validation';
+import { modelApis, modelProviders, sameCredentialScope, type ModelConfigInput, type ModelSettings } from '../../../src/model-config';
+import { validateEndpoint } from '../connection/validation';
 
 export const modelConfigSchema = z.object({
   provider: z.enum(modelProviders),

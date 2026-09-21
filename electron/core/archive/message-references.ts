@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { Message } from '../../src/shared';
+import type { Message } from '../../../src/shared';
 
 export const MAX_REFERENCED_MESSAGES = 6;
 export function replyIds(message: Message): string[] {

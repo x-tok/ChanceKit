@@ -5,7 +5,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import path from 'node:path';
 import os from 'node:os';
 import { configForProvider, defaultModelConfig, modelProviderPresets } from '../src/model-config';
-import { ModelSettingsStore, modelConfigInputSchema, type SecretEncryption } from '../electron/core/model-settings';
+import { ModelSettingsStore, modelConfigInputSchema, type SecretEncryption } from '../electron/core/models/model-settings';
 
 const config = { ...defaultModelConfig, modelId: 'test-model' };
 function encryption(): SecretEncryption {

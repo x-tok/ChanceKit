@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readManagedAttachment } from '../electron/core/attachment-file';
+import { readManagedAttachment } from '../electron/core/archive/attachment-file';
 
 test('managed attachment files must remain in the cache, match the archived filename and obey size limits', async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), 'chancekit-attachments-'));

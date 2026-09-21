@@ -1,11 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import type { Message } from '../../src/shared';
-import { addDays, emptyProcessingStatus, isOngoingActivity, scheduleProcessingVersion, type Activity, type ActivityDetail, type ActivityInput, type ActivitySource, type ProcessingStatus, type RecruitingInformationInput, type RelatedMessageSource, type SchedulePage, type ScheduleQuery } from '../../src/schedule';
+import type { Message } from '../../../src/shared';
+import { addDays, emptyProcessingStatus, isOngoingActivity, scheduleProcessingVersion, type Activity, type ActivityDetail, type ActivityInput, type ActivitySource, type ProcessingStatus, type RecruitingInformationInput, type RelatedMessageSource, type SchedulePage, type ScheduleQuery } from '../../../src/schedule';
 import { extractionSchema } from './activity-schema';
 import { isPlainJobAdvertisement, reviewActivities } from './activity-review';
 import { informationCandidate, RecruitingInformationStore } from './recruiting-information';
-import { readReferenceGraph, type ReferenceGraph } from './message-references';
+import { readReferenceGraph, type ReferenceGraph } from '../archive/message-references';
 
 export interface ExtractionResult {
   activities: ActivityInput[];

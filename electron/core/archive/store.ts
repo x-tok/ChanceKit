@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import type { Account, Group, Message, MessagePage, Segment } from '../../src/shared';
+import type { Account, Group, Message, MessagePage, Segment } from '../../../src/shared';
 
 const textOf = (segments: Segment[]) => segments.map(segment => {
   if (segment.type === 'text') return String(segment.data.text ?? '');

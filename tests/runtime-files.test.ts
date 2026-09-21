@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, access, rename } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { runtimeFiles, discardRuntimePath, recoverRuntimeDirectory, replaceRuntimeDirectory } from '../electron/core/runtime-files';
+import { runtimeFiles, discardRuntimePath, recoverRuntimeDirectory, replaceRuntimeDirectory } from '../electron/core/runtime/runtime-files';
 
 test('runtime replacement preserves account data and rolls back a failed promotion', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'chancekit-replacement-'));

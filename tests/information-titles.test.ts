@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readArticleTitle, InformationTitleReader } from '../electron/core/information-titles';
-import { shareCardMaterials } from '../electron/core/material-title';
-import { normalizeMessage } from '../electron/core/store';
+import { readArticleTitle, InformationTitleReader } from '../electron/core/processing/information-titles';
+import { shareCardMaterials } from '../electron/core/materials/material-title';
+import { normalizeMessage } from '../electron/core/archive/store';
 import { sample } from './fixtures';
-import type { RecruitingInformationStore } from '../electron/core/recruiting-information';
+import type { RecruitingInformationStore } from '../electron/core/processing/recruiting-information';
 
 test('title-only reads prefer the article heading, never fetch posters, and reject challenge titles', async () => {
   const requested: string[] = [];

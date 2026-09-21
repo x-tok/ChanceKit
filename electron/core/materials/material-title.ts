@@ -1,5 +1,5 @@
-import type { Message } from '../../src/shared';
-import type { ActivitySource } from '../../src/schedule';
+import type { Message } from '../../../src/shared';
+import type { ActivitySource } from '../../../src/schedule';
 import { sourceLink } from './material-links';
 
 export function readableTitle(value: unknown): string | undefined {

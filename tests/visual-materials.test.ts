@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readVisualMaterials } from '../electron/core/visual-materials';
+import { readVisualMaterials } from '../electron/core/materials/visual-materials';
 import { defaultModelConfig } from '../src/model-config';
 
 const settings = { config: { ...defaultModelConfig, baseUrl: 'http://127.0.0.1:9999/v1' }, apiKey: 'synthetic-key', updatedAt: '' };

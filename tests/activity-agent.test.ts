@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { collectMessageMaterials, downloadPublicMaterial, isPublicAddress, parseMaterialPage, publicMaterialUrl, resolvePublicHost, type MaterialDownload } from '../electron/core/message-materials';
-import { extractActivities } from '../electron/core/activity-agent';
-import { normalizeMessage } from '../electron/core/store';
+import { collectMessageMaterials, downloadPublicMaterial, isPublicAddress, parseMaterialPage, publicMaterialUrl, resolvePublicHost, type MaterialDownload } from '../electron/core/materials/message-materials';
+import { extractActivities } from '../electron/core/processing/activity-agent';
+import { normalizeMessage } from '../electron/core/archive/store';
 import { defaultModelConfig } from '../src/model-config';
-import type { ProcessingJob } from '../electron/core/schedule-store';
+import type { ProcessingJob } from '../electron/core/processing/schedule-store';
 import { sample } from './fixtures';
 import sharp from 'sharp';
-import { ExtractionFailure } from '../electron/core/extraction-failure';
-import { readPdfMaterial } from '../electron/core/material-pdf';
+import { ExtractionFailure } from '../electron/core/processing/extraction-failure';
+import { readPdfMaterial } from '../electron/core/materials/material-pdf';
 import { pdfFixture } from './pdf-fixtures';
 
 const png = await sharp({ create: { width: 10, height: 10, channels: 3, background: '#ffffff' } }).png().toBuffer();

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { activityTypes } from '../../src/schedule';
+import { activityTypes } from '../../../src/schedule';
 
 export const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   const date = new Date(`${value}T00:00:00Z`);

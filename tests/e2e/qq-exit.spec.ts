@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { once } from 'node:events';
 import path from 'node:path';
 import os from 'node:os';
-import { macLoader } from '../../electron/core/mac-loader';
+import { macLoader } from '../../electron/core/runtime/mac-loader';
 
 test('the macOS runtime loader handles a pre-login stop with a clean Electron exit', async () => {
   test.skip(process.platform !== 'darwin', 'macOS loader only');

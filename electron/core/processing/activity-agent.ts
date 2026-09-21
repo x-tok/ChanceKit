@@ -1,23 +1,23 @@
 import { Type } from 'typebox';
-import { activityTypes } from '../../src/schedule';
-import { createConfiguredPiAgent } from './pi-model';
+import { activityTypes } from '../../../src/schedule';
+import { createConfiguredPiAgent } from '../models/pi-model';
 import { extractionSchema } from './activity-schema';
-import { collectMessageMaterials, type MaterialDownload, type MessageMaterials } from './message-materials';
-import type { StoredModelSettings } from './model-settings';
+import { collectMessageMaterials, type MaterialDownload, type MessageMaterials } from '../materials/message-materials';
+import type { StoredModelSettings } from '../models/model-settings';
 import type { ExtractionResult, ProcessingJob } from './schedule-store';
-import type { AttachmentResolver } from './material-document';
-import { readVisualMaterials } from './visual-materials';
-import { linksInSourceText, sourceLink } from './material-links';
-import { publicMaterialUrl } from './message-materials';
+import type { AttachmentResolver } from '../materials/material-document';
+import { readVisualMaterials } from '../materials/visual-materials';
+import { linksInSourceText, sourceLink } from '../materials/material-links';
+import { publicMaterialUrl } from '../materials/message-materials';
 import { recruitingEvidencePolicy } from './activity-policy';
 import { canTryMessageFirst, isPlainJobAdvertisement, reviewActivities, supportedActivity } from './activity-review';
 import { ExtractionFailure } from './extraction-failure';
 import { informationMaterials } from './recruiting-information';
-import type { Message } from '../../src/shared';
-import type { ResolvedAttachment } from './material-document';
-import { replyIds } from './message-references';
-import type { WebpagePdfReader } from './webpage-pdf';
-import { normalizeMaterialImage } from './material-image';
+import type { Message } from '../../../src/shared';
+import type { ResolvedAttachment } from '../materials/material-document';
+import { replyIds } from '../archive/message-references';
+import type { WebpagePdfReader } from '../materials/webpage-pdf';
+import { normalizeMaterialImage } from '../materials/material-image';
 
 const nullable = (schema: ReturnType<typeof Type.String>) => Type.Union([schema, Type.Null()]);
 const parameters = Type.Object({

@@ -72,7 +72,7 @@
 
 API Key 由 Electron `safeStorage` 加密，只在主进程使用；页面不会回填已保存的密钥。更改服务商、协议或 API 地址后需重新填写密钥，避免旧密钥发往其他服务。系统加密不可用时拒绝保存，不退回明文。浏览器仅提供表单预览，不保存密钥或调用模型。
 
-配置仅作用于见机，不修改 `~/.pi/agent` 或其他 pi 安装。`electron/core/pi-model.ts` 的 `createSavedPiAgent()` 可创建使用此配置的 pi agent，日程提取复用同一套模型配置和协议适配。
+配置仅作用于见机，不修改 `~/.pi/agent` 或其他 pi 安装。`electron/core/models/pi-model.ts` 的 `createSavedPiAgent()` 可创建使用此配置的 pi agent，日程提取复用同一套模型配置和协议适配。
 
 ### 日程与活动处理
 
@@ -251,7 +251,14 @@ electron/main.ts        Electron 生命周期与模块装配
 electron/preload.ts     隔离的桌面桥接
 electron/worker.ts      utilityProcess 后台服务入口
 electron/onboarding/    首次设置状态存储与 IPC 注册
-electron/core/          OneBot、NapCat、运行管理、业务服务和 SQLite
+electron/core/          Electron 后台领域模块
+  application/          后台服务与命令编排
+  connection/           OneBot、NapCat 管理接口与连接校验
+  runtime/              QQ/NapCat 进程、组件和运行目录
+  archive/              消息存储、附件与引用关系
+  models/               模型配置与 pi 适配
+  materials/            网页、图片、PDF 和文档读取
+  processing/           招聘信息、日程提取与处理队列
 resources/napcat/       固定组件清单与来源说明
 scripts/                开发、构建、组件准备与打包校验
 .github/workflows/      仅手动触发的跨平台发布流程
@@ -260,7 +267,7 @@ docs/                   接入细节与验证范围
 DESIGN.md               界面设计约定
 ```
 
-技术栈为 Electron、React、TypeScript、Vite 和 Node.js SQLite。页面和 Electron 主进程分别按功能目录组织；`main.ts` 只装配 onboarding 模块，不保存其状态规则。渲染进程不直接操作 QQ 或数据库，消息服务运行在独立后台进程，通过受限 IPC 与界面通信。
+技术栈为 Electron、React、TypeScript、Vite 和 Node.js SQLite。页面和 Electron 后台分别按功能目录组织；`main.ts` 只负责生命周期、IPC 和领域模块装配，不保存具体业务规则。渲染进程不直接操作 QQ 或数据库，消息服务运行在独立后台进程，通过受限 IPC 与界面通信。Electron 核心模块的职责和依赖方向见 [`electron/core/README.md`](electron/core/README.md)。
 
 ## 当前限制与后续方向
 

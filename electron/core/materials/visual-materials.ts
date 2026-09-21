@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { z } from 'zod';
 import type { ImageContent } from '@earendil-works/pi-ai';
-import { createConfiguredPiAgent } from './pi-model';
-import type { StoredModelSettings } from './model-settings';
+import { createConfiguredPiAgent } from '../models/pi-model';
+import type { StoredModelSettings } from '../models/model-settings';
 
 export interface ImageMaterialGroup { label: string; images: ImageContent[] }
 export interface VisualRepairBudget { used: number }
