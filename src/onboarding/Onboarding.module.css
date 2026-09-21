@@ -85,11 +85,15 @@
 .qrReady { background: white; border-color: #c7d9ce; }
 .loginActions { display: flex; justify-content: center; margin-top: 18px; }
 .groupStage .stageIntro { margin-bottom: 17px; }
-.accountLine { min-height: 50px; display: flex; align-items: center; gap: 10px; padding: 7px 2px 11px; border-bottom: 1px solid var(--line); color: var(--green); }
-.accountLine > span:nth-child(2) { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.accountLine strong { color: var(--ink); font-size: 13px; }
-.accountLine small { color: var(--muted); font-size: 10px; }
-.accountLine > span:last-child { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.accountLine { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 2px 10px; border-bottom: 1px solid var(--line); }
+.accountIdentity { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.accountAvatar { position: relative; width: 40px; height: 40px; display: grid; place-items: center; flex-shrink: 0; overflow: visible; border-radius: 7px; background: #e7eee9; color: #486050; font-size: 15px; font-weight: 600; }
+.accountAvatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.accountVerified { position: absolute; right: -4px; bottom: -4px; border-radius: 50%; background: var(--canvas); color: var(--green); stroke-width: 2.5; }
+.accountDetails { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.accountDetails strong { color: var(--ink); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.accountDetails small { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.accountSelection { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .groupPicker { min-width: 0; }
 .groupSearch { min-height: 40px; display: flex; align-items: center; gap: 9px; margin: 12px 0 7px; padding: 0 12px; border: 1px solid #d8dfda; border-radius: 6px; color: var(--muted); }
 .groupSearch:focus-within { outline: 2px solid var(--green); outline-offset: 2px; }
@@ -158,6 +162,8 @@
   .stageIntro h1 { margin-top: 6px; font-size: 25px; }
   .stageIntro p { margin-top: 6px; line-height: 1.6; }
   .groupStage .stageIntro { margin-bottom: 10px; }
+  .accountLine { min-height: 52px; padding-top: 6px; padding-bottom: 8px; }
+  .accountAvatar { width: 36px; height: 36px; }
   .groupList { min-height: 192px; }
   .groupList label { min-height: 48px; }
   .stageFooter { margin-top: 14px; padding-top: 13px; }

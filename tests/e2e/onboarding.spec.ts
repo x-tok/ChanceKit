@@ -20,6 +20,7 @@ test('first-run onboarding completes QQ, DeepSeek and bounded group sync', async
   const initial: AppState = { phase: 'idle', detail: '尚未连接 QQ', runtime: null, groups: [], archived: 0, historyBusy: false, logs: [],
     qq: { path: '/Applications/QQ.app', version: '9.9.21', architecture: 'arm64', platform: 'darwin' } };
   try {
+    await page.route('https://q1.qlogo.cn/**', route => route.fulfill({ contentType: 'image/png', path: 'build/icon.png' }));
     await page.addInitScript(({ initial, groups, defaultModelConfig, emptyProcessingStatus, emptyInformationPage }) => {
       let state = structuredClone(initial);
       let listener: ((event: AppEvent) => void) | undefined;
@@ -78,6 +79,9 @@ test('first-run onboarding completes QQ, DeepSeek and bounded group sync', async
     await expect(page.getByAltText('QQ 登录二维码')).toBeVisible();
     await page.evaluate(() => (window as unknown as { finishQQLogin(): void }).finishQQLogin());
     await expect(page.getByRole('heading', { name: '选择需要整理的群聊' })).toBeVisible();
+    await expect(page.getByText('见机测试账号', { exact: true })).toBeVisible();
+    await expect(page.getByText('QQ 号：100010001', { exact: true })).toBeVisible();
+    await expect(page.locator('img[src*="q1.qlogo.cn"]').first()).toBeVisible();
     await expect(page.getByText('宣讲会与双选会通知', { exact: true })).toBeVisible();
     await expect(page.getByText('第 1 / 2 页', { exact: false })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true);

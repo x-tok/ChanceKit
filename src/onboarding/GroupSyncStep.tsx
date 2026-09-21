@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, CheckCircle2, CircleAlert, LoaderCircle, QrCode, RefreshCw, Sparkles } from 'lucide-react';
+import { ArrowLeft, CircleAlert, LoaderCircle, QrCode, RefreshCw, Sparkles } from 'lucide-react';
 import QRCode from 'qrcode';
 import type { AppState } from '../shared';
 import { bridge, isDesktop } from '../bridge';
 import { onboardingError } from './errors';
 import { initialSyncWindow, runInitialSync, type InitialSyncProgress } from './initial-sync';
 import { GroupPicker } from './GroupPicker';
+import { QQAccountIdentity } from './QQAccountIdentity';
 import s from './Onboarding.module.css';
 
 export function GroupSyncStep({ state, onBack, onComplete, onError }: { state: AppState; onBack: () => void; onComplete: () => void; onError: (message: string) => void }) {
@@ -62,7 +63,7 @@ export function GroupSyncStep({ state, onBack, onComplete, onError }: { state: A
           : <button className={s.primaryButton} disabled={connectionBusy || !state.qq || !isDesktop} onClick={() => void run(async () => { await bridge.request({ type: 'start', path: state.qq!.path }); })}>{connectionBusy ? <LoaderCircle className={s.spin} size={17} /> : <QrCode size={17} />}{state.phase === 'error' ? '重新准备登录' : '开始 QQ 登录'}</button>}
       </div>
     </div> : <>
-      <div className={s.accountLine}><CheckCircle2 size={18} /><span><strong>{state.account?.nickname || 'QQ 用户'}</strong><small>{state.account?.id}</small></span><span>{selected.size} 个已选择</span></div>
+      <div className={s.accountLine}>{state.account && <QQAccountIdentity account={state.account} />}<span className={s.accountSelection}>{selected.size} 个已选择</span></div>
       <GroupPicker groups={state.groups} selected={selected} disabled={syncing} onToggle={toggle} />
       {progress && <div className={s.progress} role="status"><span><LoaderCircle className={syncing ? s.spin : ''} size={17} /></span><div><strong>{syncing ? `正在同步 ${progress.current} / ${progress.total}` : '同步已停止'}</strong><p>{progress.group} · 已新增 {progress.added.toLocaleString()} 条</p></div></div>}
       <div className={s.stageFooter}><span className={s.billingNotice}><CircleAlert size={15} />同步后会开始 AI 整理并产生 API 费用，请留意账户额度。</span><button className={s.primaryButton} disabled={syncing || selected.size === 0} onClick={() => void sync()}>{syncing ? <LoaderCircle className={s.spin} size={17} /> : <Sparkles size={17} />}{syncing ? '正在同步并整理' : `同步 ${selected.size} 个群聊并开始整理`}</button></div>
