@@ -1,7 +1,5 @@
 import type { Group } from '../shared';
 
-export const onboardingGroupPageSize = 4;
-
 export function sortGroupsByActivity(groups: readonly Group[]): Group[] {
   return [...groups].sort((left, right) =>
     (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0)

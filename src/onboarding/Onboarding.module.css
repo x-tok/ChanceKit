@@ -40,7 +40,7 @@
 .secondaryButton { color: var(--ink); background: white; border: 1px solid var(--line); }
 .textButton, .backButton { color: var(--green); background: none; border: 0; padding-left: 4px; padding-right: 4px; }
 .backButton { position: absolute; top: -4px; right: 0; z-index: 2; color: var(--muted); }
-.primaryButton:active, .secondaryButton:active, .textButton:active, .backButton:active, .groupPagination button:active { transform: scale(.97); }
+.primaryButton:active, .secondaryButton:active, .textButton:active, .backButton:active { transform: scale(.97); }
 .qqSequence { list-style: none; margin: 24px 0 0; padding: 0; border-top: 1px solid var(--line); }
 .qqSequence li { position: relative; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 13px; padding: 15px 2px; border-bottom: 1px solid var(--line); }
 .qqSequence li:not(:last-child)::after { content: ''; position: absolute; top: 48px; bottom: -1px; left: 18px; width: 1px; background: #d7dfda; }
@@ -99,8 +99,8 @@
 .groupSearch:focus-within { outline: 2px solid var(--green); outline-offset: 2px; }
 .groupSearch input { width: 100%; border: 0; background: none; padding: 9px 0; font-size: 12px; }
 .groupSearch input:focus-visible { outline: 0; }
-.groupList { min-height: 212px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.groupList label { min-height: 53px; display: flex; align-items: center; gap: 11px; padding: 7px 10px; border-bottom: 1px solid #eef1ef; cursor: pointer; }
+.groupList { height: clamp(212px, 32dvh, 300px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.groupList label { min-height: 50px; display: flex; align-items: center; gap: 11px; padding: 7px 10px; border-bottom: 1px solid #eef1ef; cursor: pointer; }
 .groupList label:last-of-type { border-bottom: 0; }
 .groupList label > span:last-child { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .groupList strong { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
@@ -108,12 +108,7 @@
 .groupIcon { width: 34px; height: 34px; display: grid; place-items: center; flex-shrink: 0; border-radius: 6px; background: var(--panel); color: #68756c; }
 .groupSelected { background: var(--green-light); }
 .groupSelected .groupIcon { color: var(--green); background: #dcebe1; }
-.emptyGroups { min-height: 210px; display: grid; place-items: center; color: var(--muted); text-align: center; font-size: 12px; }
-.groupPagination { min-height: 42px; display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; border-bottom: 1px solid var(--line); }
-.groupPagination button { width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--ink); }
-.groupPagination button:last-child { justify-self: end; }
-.groupPagination span { display: flex; justify-content: center; align-items: baseline; gap: 9px; color: var(--ink); font-size: 11px; font-variant-numeric: tabular-nums; }
-.groupPagination small { color: var(--muted); font-size: 10px; }
+.emptyGroups { min-height: 100%; display: grid; place-items: center; color: var(--muted); text-align: center; font-size: 12px; }
 .progress { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--panel); }
 .progress > span { color: var(--green); }
 .progress strong { font-size: 12px; font-weight: 600; }
@@ -126,7 +121,7 @@
 @media (hover: hover) {
   .primaryButton:hover { background: #1b573e; }
   .secondaryButton:hover { background: #edf2ef; }
-  .textButton:hover, .backButton:hover, .keyField > span > button:hover, .groupPagination button:hover:not(:disabled) { color: #163b29; background: #f3f7f4; }
+  .textButton:hover, .backButton:hover, .keyField > span > button:hover { color: #163b29; background: #f3f7f4; }
   .groupList label:hover { background: #edf3ef; }
   .groupList .groupSelected:hover { background: #e3efe7; }
 }
@@ -154,7 +149,6 @@
   .stageFooter { align-items: stretch; flex-direction: column; }
   .stageFooter .primaryButton { width: 100%; margin-left: 0; }
   .actionsLeft { align-items: flex-start; flex-direction: column; }
-  .groupPagination span { gap: 5px; }
 }
 @media (min-width: 721px) and (max-height: 700px) {
   .shell { padding-top: 26px; padding-bottom: 18px; }
@@ -164,8 +158,6 @@
   .groupStage .stageIntro { margin-bottom: 10px; }
   .accountLine { min-height: 52px; padding-top: 6px; padding-bottom: 8px; }
   .accountAvatar { width: 36px; height: 36px; }
-  .groupList { min-height: 192px; }
-  .groupList label { min-height: 48px; }
   .stageFooter { margin-top: 14px; padding-top: 13px; }
 }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
