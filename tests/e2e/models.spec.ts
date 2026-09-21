@@ -31,8 +31,8 @@ test('model configuration saves encrypted credentials, survives restart and test
   try {
     app = await electron.launch({ args: ['.'], env });
     let page = await app.firstWindow();
-    await page.getByRole('button', { name: '模型配置', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '模型配置', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '消息整理模型', exact: true })).toBeVisible();
     await expect(page.getByLabel('服务商', { exact: true })).toHaveValue('deepseek');
     await expect(page.getByLabel('模型', { exact: true })).toHaveValue('deepseek-flash');
     await expect(page.getByLabel('模型 ID', { exact: true })).toHaveValue('deepseek-flash');
@@ -41,11 +41,13 @@ test('model configuration saves encrypted credentials, survives restart and test
     await page.getByLabel('API 地址', { exact: true }).fill(baseUrl);
     await page.getByLabel('模型 ID', { exact: true }).fill('local-test-model');
     await page.getByLabel('API Key', { exact: false }).fill('sk-e2e-private-key');
+    expect(await page.getByLabel('API Key', { exact: false }).evaluate(element => getComputedStyle(element).getPropertyValue('-webkit-text-security'))).toBe('disc');
     await page.getByRole('button', { name: '显示新密钥' }).click();
     await expect(page.getByLabel('API Key', { exact: false })).toHaveAttribute('type', 'text');
+    expect(await page.getByLabel('API Key', { exact: false }).evaluate(element => getComputedStyle(element).getPropertyValue('-webkit-text-security'))).toBe('none');
     await page.getByRole('button', { name: '隐藏新密钥' }).click();
     await page.getByRole('button', { name: '群消息', exact: true }).click();
-    await page.getByRole('button', { name: '模型配置', exact: true }).click();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.getByLabel('模型 ID', { exact: true })).toHaveValue('local-test-model');
     await page.getByRole('button', { name: '保存配置', exact: true }).click();
     await expect(page.getByText('配置已保存', { exact: true })).toBeVisible();
@@ -57,7 +59,7 @@ test('model configuration saves encrypted credentials, survives restart and test
 
     app = await electron.launch({ args: ['.'], env });
     page = await app.firstWindow();
-    await page.getByRole('button', { name: '模型配置', exact: true }).click();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.getByLabel('模型 ID', { exact: true })).toHaveValue('local-test-model');
     await expect(page.getByText('密钥已加密保存', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '测试连接', exact: true }).click();
@@ -96,14 +98,14 @@ test('model settings browser preview is responsive and never pretends to save se
   const page = await browser.newPage();
   try {
     await page.goto(server.resolvedUrls!.local[0]);
-    await page.getByRole('button', { name: '模型配置', exact: true }).click();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.getByLabel('模型', { exact: true })).toHaveValue('deepseek-flash');
     await expect(page.getByLabel('API 地址', { exact: true })).toHaveValue('https://api.deepseek.com');
     await expect(page.getByRole('button', { name: '保存配置', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: '测试连接', exact: true })).toBeDisabled();
     for (const width of [1280, 760, 375, 320]) {
       await page.setViewportSize({ width, height: 820 });
-      await expect(page.getByRole('heading', { name: '模型配置', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '消息整理模型', exact: true })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       expect(await page.locator('section[aria-label="模型配置"]').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: `test-results/models-preview-${width}.png` });

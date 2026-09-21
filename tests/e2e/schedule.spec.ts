@@ -62,7 +62,7 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     let page = await app.firstWindow();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.getByRole('button', { name: '模型配置', exact: true }).click();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
     await page.getByLabel('服务商', { exact: true }).selectOption('custom');
     await page.getByLabel('API 地址', { exact: true }).fill(baseUrl);
     await page.getByLabel('模型 ID', { exact: true }).fill('schedule-test-model');
@@ -258,7 +258,7 @@ test('schedule browser preview has real empty states and responsive navigation d
     for (const width of [1280, 900, 760, 375, 320]) {
       await page.setViewportSize({ width, height: 820 });
       await expect(page.getByRole('heading', { name: '日程', exact: true })).toBeVisible();
-      for (const name of ['群消息', '日程', '连接 QQ', '模型配置']) await expect(page.getByRole('button', { name, exact: true }).first()).toBeVisible();
+      for (const name of ['群消息', '日程', '设置']) await expect(page.getByRole('button', { name, exact: true }).first()).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       expect(await page.locator('section[aria-label="日程"]').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: `test-results/schedule-preview-${width}.png` });

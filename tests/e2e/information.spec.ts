@@ -56,7 +56,7 @@ test('recruiting information keeps pushes and incomplete attachments, moves reco
   try {
     app = await electron.launch({ args: ['.'], env });
     let page = await app.firstWindow();
-    await page.getByRole('button', { name: '模型配置', exact: true }).click();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
     await page.getByLabel('服务商', { exact: true }).selectOption('custom');
     await page.getByLabel('API 地址', { exact: true }).fill(baseUrl);
     await page.getByLabel('模型 ID', { exact: true }).fill('information-test');

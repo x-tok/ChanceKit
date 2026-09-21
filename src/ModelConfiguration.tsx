@@ -15,7 +15,7 @@ const apiLabels = {
 const errorText = (error: unknown) => (error instanceof Error ? error.message : '操作失败，请重试。').replace(/^Error invoking remote method '[^']+': Error: /, '');
 const reasoningLabels: Record<ReasoningLevel, string> = { off: '关闭', low: '低', medium: '中', high: '高' };
 
-export function ModelConfiguration({ active }: { active: boolean }) {
+export function ModelConfiguration({ active, embedded = false }: { active: boolean; embedded?: boolean }) {
   const [settings, setSettings] = useState<ModelSettings>(emptySettings);
   const [catalog, setCatalog] = useState<ModelProviderEntry[]>(modelProviderPresets);
   const [draft, setDraft] = useState<ModelConfig>({ ...defaultModelConfig });
@@ -125,13 +125,13 @@ export function ModelConfiguration({ active }: { active: boolean }) {
     finally { setSaving(false); }
   };
 
-  return <section hidden={!active} className={s.page} aria-label="模型配置">
+  return <section hidden={!active} className={`${s.page} ${embedded ? s.embedded : ''}`} aria-label="模型配置">
     <div className={s.scroll}>
       <div className={s.content}>
-        <header className={s.heading}>
+        {!embedded && <header className={s.heading}>
           <div><span className={s.eyebrow}>智能体设置</span><h1>模型配置</h1></div>
           <span className={s.agentLabel}><Bot size={18} />pi agent</span>
-        </header>
+        </header>}
         <div className={s.configSummary}>
           <span className={`${s.configStatus} ${configured && !dirty ? s.ready : ''}`}><Circle size={7} fill="currentColor" />{loading ? '正在读取' : dirty ? '有未保存的更改' : configured ? '已配置' : '待配置'}</span>
           <span>{settings.updatedAt ? `上次保存 ${new Date(settings.updatedAt).toLocaleString('zh-CN', { hour12: false })}` : '默认 LLM'}</span>
@@ -152,7 +152,8 @@ export function ModelConfiguration({ active }: { active: boolean }) {
                   <label htmlFor="model-api-key">API Key {local && <small>本地服务可留空</small>}</label>
                   <div className={s.keyInput}>
                     <KeyRound size={16} />
-                    <input id="model-api-key" type={visibleKey ? 'text' : 'password'} value={apiKey ?? ''} onChange={event => { setApiKey(event.target.value); resetFeedback(); }} placeholder={retainedKey ? '已保存，留空保留现有密钥' : '输入 API Key'} maxLength={16384} autoComplete="new-password" spellCheck={false} />
+                    {/* Visual masking avoids macOS Secure Keyboard Entry blocking global paste tools. */}
+                    <input id="model-api-key" type="text" className={visibleKey ? '' : s.maskedKey} value={apiKey ?? ''} onChange={event => { setApiKey(event.target.value); resetFeedback(); }} placeholder={retainedKey ? '已保存，留空保留现有密钥' : '输入 API Key'} maxLength={16384} autoComplete="off" spellCheck={false} />
                     <button type="button" className={common.iconButton} title={visibleKey ? '隐藏新密钥' : '显示新密钥'} aria-label={visibleKey ? '隐藏新密钥' : '显示新密钥'} disabled={!apiKey} onClick={() => setVisibleKey(value => !value)}>{visibleKey ? <EyeOff size={16} /> : <Eye size={16} />}</button>
                   </div>
                   <div className={s.keyStatus}>

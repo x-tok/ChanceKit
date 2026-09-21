@@ -31,7 +31,7 @@ test('macOS system quit waits for the managed runtime and worker to exit, includ
       const events = async () => (await readFile(path.join(profile, 'quit-events.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
       await expect.poll(events).toContain('ready');
       const page = await app.firstWindow();
-      await expect(page.getByRole('heading', { name: '连接你的 QQ' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '日程', exact: true })).toBeVisible();
       await page.screenshot({ path: 'test-results/system-quit-before.png' });
       const appProcess = app.process();
       const pid = appProcess.pid!;
