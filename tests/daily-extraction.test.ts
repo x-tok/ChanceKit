@@ -14,6 +14,7 @@ import { sameRecruitingEvent } from '../electron/core/processing/daily-extractio
 import { DailyScheduleProcessor } from '../electron/core/processing/daily-extraction/queue/processor';
 import { createReadSourceLinksTool } from '../electron/core/processing/daily-extraction/agent/tools/read-source-links';
 import { DAILY_AGENT_TOOL_NAMES } from '../electron/core/processing/daily-extraction/agent/tools/index';
+import { parseDailySubmission } from '../electron/core/processing/daily-extraction/agent/tools/submit-daily-activities';
 import type { DailyExtractionResult, DailyProcessingJob, PreparedDailySource } from '../electron/core/processing/daily-extraction/types';
 import type { ActivityInput } from '../src/schedule';
 import { sample } from './fixtures';
@@ -64,7 +65,7 @@ function prepared(job: DailyProcessingJob): PreparedDailySource[] {
 }
 
 function result(job: DailyProcessingJob, activities = [{ ...activity, sourceRefs: job.messages.map(source => source.ref) }]): DailyExtractionResult {
-  return { activities, information: [], sources: prepared(job), warnings: [], reviewReasons: [] };
+  return { activities, sources: prepared(job), warnings: [], reviewReasons: [] };
 }
 
 test('Beijing calendar boundaries create one deterministic job per day', async t => {
@@ -159,6 +160,65 @@ test('daily prompt contains only numbered human evidence and classified links', 
   assert.match(prompt, /微信公众号文章/);
 });
 
+test('agent submission becomes a validated JSON array', () => {
+  const output = parseDailySubmission({ activities: [{ ...activity, sourceRefs: [1, 1] }] }, new Set([1]));
+  assert.equal(Array.isArray(output), true);
+  assert.deepEqual(output, [{ ...activity, sourceRefs: [1] }]);
+  assert.throws(() => parseDailySubmission({ activities: [{ ...activity, startDate: '9月24日', sourceRefs: [1] }] }, new Set([1])), /日期/);
+  assert.throws(() => parseDailySubmission({ activities: [{ ...activity, sourceRefs: [2] }] }, new Set([1])), /批次之外/);
+});
+
+test('processing details separate pending, running and completed messages and retain the JSON result', async t => {
+  const { messages, daily } = await fixture(t);
+  const time = Date.parse('2026-09-21T04:00:00Z') / 1000;
+  messages.put([
+    normalizeMessage({ ...sample(1, '星河科技宣讲会通知'), time }, 'a'),
+    normalizeMessage({ ...sample(2, '谢谢，收到'), time: time + 60 }, 'a'),
+  ]);
+  daily.enqueue('a');
+  const since = time - 60;
+  const pending = daily.details('a', { bucket: 'pending', since });
+  assert.equal(pending.total, 2);
+  assert.deepEqual(pending.counts, { pending: 2, running: 0, completed: 0 });
+
+  const job = daily.claim('a')!;
+  const running = daily.details('a', { bucket: 'running', since });
+  assert.equal(running.total, 2);
+  assert.equal(running.items.every(item => item.state === 'running'), true);
+
+  const output = result(job, [{ ...activity, sourceRefs: [1] }]);
+  daily.complete(job, output);
+  const completed = daily.details('a', { bucket: 'completed', since });
+  assert.deepEqual(completed.counts, { pending: 0, running: 0, completed: 2 });
+  assert.deepEqual(completed.items.find(item => item.text.includes('星河科技'))?.activityTitles, [activity.title]);
+  assert.deepEqual(completed.items.find(item => item.text.includes('谢谢'))?.activityTitles, []);
+  assert.deepEqual(daily.structuredResult('a', '2026-09-21'), output.activities);
+});
+
+test('partial daily results mark only affected messages for review', async t => {
+  const { messages, daily } = await fixture(t);
+  const time = Date.parse('2026-09-21T04:00:00Z') / 1000;
+  messages.put([
+    normalizeMessage({ ...sample(1, '链接中的宣讲会'), time }, 'a'),
+    normalizeMessage({ ...sample(2, '普通群聊'), time: time + 60 }, 'a'),
+  ]);
+  daily.enqueue('a');
+  const job = daily.claim('a')!;
+  const output = result(job, [{ ...activity, sourceRefs: [1] }]);
+  output.sources[0].warnings = ['链接读取失败'];
+  output.warnings = ['链接读取失败'];
+  output.reviewReasons = ['链接读取失败'];
+  daily.complete(job, output);
+
+  const completed = daily.details('a', { bucket: 'completed', since: time - 60 });
+  const affected = completed.items.find(item => item.text.includes('链接'))!;
+  const ordinary = completed.items.find(item => item.text.includes('普通'))!;
+  assert.equal(affected.state, 'partial');
+  assert.equal(affected.error, '链接读取失败');
+  assert.equal(ordinary.state, 'completed');
+  assert.equal(ordinary.error, '');
+});
+
 test('links are classified before reading and oversized days split in stable source order', () => {
   assert.equal(classifySourceLink('https://mp.weixin.qq.com/s/abc'), 'wechat-article');
   assert.equal(classifySourceLink('https://example.com/poster.png?x=1'), 'direct-image');
@@ -217,4 +277,47 @@ test('processor runs different days concurrently while keeping one lease per day
   await waitUntil(() => f.daily.status('a').completed === 3);
   assert.equal(peak, 2);
   assert.equal(f.daily.status('a').running, 0);
+});
+
+test('one-time processing respects its start time and stops when the queue becomes idle', async t => {
+  const f = await fixture(t);
+  const oldTime = Date.parse('2026-09-17T04:00:00Z') / 1000;
+  const includedTime = Date.parse('2026-09-20T04:00:00Z') / 1000;
+  f.messages.put([
+    normalizeMessage({ ...sample(1, '范围外消息'), time: oldTime }, 'a'),
+    normalizeMessage({ ...sample(2, '范围内消息'), time: includedTime }, 'a'),
+  ]);
+  let requests = 0;
+  const settings = { config: defaultModelConfig, apiKey: 'test-key', updatedAt: new Date().toISOString() };
+  f.processor = new DailyScheduleProcessor(f.daily, async () => settings, async job => {
+    requests++;
+    return result(job, []);
+  }, () => {});
+  f.processor.setAccount('a');
+  await f.processor.configure({ enabled: true, concurrency: 2, stopWhenIdle: true, since: includedTime });
+  await waitUntil(() => f.daily.status('a').completed === 1 && !f.daily.status('a').enabled);
+  assert.equal(requests, 1);
+  assert.equal(f.daily.status('a').since, includedTime);
+
+  f.messages.put([normalizeMessage({ ...sample(3, '稍后到达的消息'), time: includedTime + 60 }, 'a')]);
+  f.processor.refresh();
+  await waitUntil(() => f.daily.status('a').pending === 1);
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(requests, 1);
+  assert.equal(f.daily.status('a').enabled, false);
+});
+
+test('reopening storage pauses an unfinished one-time sync', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'chancekit-daily-restart-'));
+  const file = path.join(root, 'messages.sqlite');
+  const first = new DailyScheduleStore(file);
+  first.configure('a', { enabled: true, concurrency: 3, stopWhenIdle: true, since: 123 });
+  assert.equal(first.status('a').enabled, true);
+  first.close();
+
+  const reopened = new DailyScheduleStore(file);
+  t.after(() => { reopened.close(); return rm(root, { recursive: true, force: true }); });
+  assert.equal(reopened.status('a').enabled, false);
+  assert.equal(reopened.status('a').stopWhenIdle, false);
+  assert.equal(reopened.status('a').since, 123);
 });

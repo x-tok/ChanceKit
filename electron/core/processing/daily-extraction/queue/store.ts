@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { Message } from '../../../../../src/shared';
-import { emptyProcessingStatus, scheduleProcessingVersion, type ActivityInput, type ActivitySource, type ProcessingStatus } from '../../../../../src/schedule';
+import { emptyProcessingStatus, scheduleProcessingVersion, type ActivityInput, type ActivitySource, type ProcessingDetailsPage, type ProcessingDetailsQuery, type ProcessingMessageBucket, type ProcessingMessageItem, type ProcessingMessageState, type ProcessingStatus } from '../../../../../src/schedule';
 import { activitySchema } from '../../activity-schema';
-import { informationCandidate, informationMaterials } from '../../recruiting-information';
 import { activityIdentity, mergeActivityFacts, sameRecruitingEvent } from '../dedupe';
 import type { DailyExtractionResult, DailyMessageSource, DailyProcessingJob } from '../types';
 import { readReferenceGraph } from '../../../archive/message-references';
@@ -34,13 +33,14 @@ export class DailyScheduleStore {
     this.db = new DatabaseSync(file);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS schedule_settings (
-        account_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, concurrency INTEGER NOT NULL DEFAULT 3
+        account_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, concurrency INTEGER NOT NULL DEFAULT 3,
+        stop_when_idle INTEGER NOT NULL DEFAULT 0, since INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS schedule_daily_jobs (
         account_id TEXT NOT NULL, source_day TEXT NOT NULL, input_hash TEXT NOT NULL,
         status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, available_at INTEGER NOT NULL DEFAULT 0,
         error TEXT NOT NULL DEFAULT '', diagnostics TEXT NOT NULL DEFAULT '[]',
-        processing_version INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL,
+        processing_version INTEGER NOT NULL DEFAULT 0, output_json TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL,
         PRIMARY KEY(account_id,source_day)
       );
       CREATE INDEX IF NOT EXISTS schedule_daily_jobs_ready ON schedule_daily_jobs(account_id,status,available_at,source_day);
@@ -62,22 +62,48 @@ export class DailyScheduleStore {
         activity_id TEXT PRIMARY KEY REFERENCES activities(id) ON DELETE CASCADE, payload TEXT NOT NULL
       );
     `);
+    const settingColumns = this.db.prepare('PRAGMA table_info(schedule_settings)').all().map(row => String(row.name));
+    if (!settingColumns.includes('stop_when_idle')) {
+      this.db.exec('ALTER TABLE schedule_settings ADD COLUMN stop_when_idle INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!settingColumns.includes('since')) {
+      this.db.exec('ALTER TABLE schedule_settings ADD COLUMN since INTEGER NOT NULL DEFAULT 0');
+    }
+    const jobColumns = this.db.prepare('PRAGMA table_info(schedule_daily_jobs)').all().map(row => String(row.name));
+    if (!jobColumns.includes('output_json')) {
+      this.db.exec("ALTER TABLE schedule_daily_jobs ADD COLUMN output_json TEXT NOT NULL DEFAULT '[]'");
+    }
+    // A one-time sync must never resume API requests after an application restart.
+    this.db.prepare('UPDATE schedule_settings SET enabled=0,stop_when_idle=0 WHERE enabled<>0 OR stop_when_idle<>0').run();
     this.db.prepare("UPDATE schedule_daily_jobs SET status='pending',attempts=max(0,attempts-1) WHERE status='running'").run();
   }
 
-  settings(accountId: string): { enabled: boolean; concurrency: number } {
-    const row = this.db.prepare('SELECT enabled,concurrency FROM schedule_settings WHERE account_id=?').get(accountId);
-    return { enabled: Boolean(row?.enabled), concurrency: Number(row?.concurrency ?? 3) };
+  settings(accountId: string): { enabled: boolean; concurrency: number; stopWhenIdle: boolean; since: number } {
+    const row = this.db.prepare('SELECT enabled,concurrency,stop_when_idle,since FROM schedule_settings WHERE account_id=?').get(accountId);
+    return {
+      enabled: Boolean(row?.enabled), concurrency: Number(row?.concurrency ?? 3),
+      stopWhenIdle: Boolean(row?.stop_when_idle), since: Number(row?.since ?? 0),
+    };
   }
 
-  configure(accountId: string, value: { enabled: boolean; concurrency: number }) {
-    this.db.prepare(`INSERT INTO schedule_settings(account_id,enabled,concurrency) VALUES(?,?,?)
-      ON CONFLICT(account_id) DO UPDATE SET enabled=excluded.enabled,concurrency=excluded.concurrency`)
-      .run(accountId, Number(value.enabled), value.concurrency);
+  configure(accountId: string, value: { enabled: boolean; concurrency: number; stopWhenIdle?: boolean; since?: number }) {
+    const since = value.since ?? this.settings(accountId).since;
+    this.db.prepare(`INSERT INTO schedule_settings(account_id,enabled,concurrency,stop_when_idle,since) VALUES(?,?,?,?,?)
+      ON CONFLICT(account_id) DO UPDATE SET enabled=excluded.enabled,concurrency=excluded.concurrency,
+      stop_when_idle=excluded.stop_when_idle,since=excluded.since`)
+      .run(accountId, Number(value.enabled), value.concurrency, Number(Boolean(value.enabled && value.stopWhenIdle)), since);
+  }
+
+  stopWhenIdle(accountId: string): boolean {
+    const active = Number(this.db.prepare(`SELECT count(*) AS n FROM schedule_daily_jobs
+      WHERE account_id=? AND status IN ('pending','running')`).get(accountId)?.n ?? 0);
+    if (active || !this.settings(accountId).stopWhenIdle) return false;
+    return Boolean(this.db.prepare(`UPDATE schedule_settings SET enabled=0,stop_when_idle=0
+      WHERE account_id=? AND enabled=1 AND stop_when_idle=1`).run(accountId).changes);
   }
 
   private rows(accountId: string, day?: string): MessageRow[] {
-    const args: (string | number)[] = [accountId];
+    const args: (string | number)[] = [accountId, this.settings(accountId).since];
     let time = '';
     if (day) {
       const [start, end] = dayRange(day);
@@ -86,7 +112,7 @@ export class DailyScheduleStore {
     }
     return this.db.prepare(`SELECT m.key,m.content_hash,m.payload,m.time,g.name FROM messages m
       JOIN groups g ON g.account_id=m.account_id AND g.id=m.group_id
-      WHERE m.account_id=? AND g.followed=1 ${time} ORDER BY m.time,m.key`).all(...args) as unknown as MessageRow[];
+      WHERE m.account_id=? AND g.followed=1 AND m.time>=? ${time} ORDER BY m.time,m.key`).all(...args) as unknown as MessageRow[];
   }
 
   private hashRows(rows: MessageRow[]): string {
@@ -111,7 +137,7 @@ export class DailyScheduleStore {
         this.db.prepare(`INSERT INTO schedule_daily_jobs(account_id,source_day,input_hash,status,updated_at,processing_version)
           VALUES(?,?,?,'pending',?,?) ON CONFLICT(account_id,source_day) DO UPDATE SET
           input_hash=excluded.input_hash,status='pending',attempts=0,available_at=0,error='',diagnostics='[]',updated_at=excluded.updated_at,
-          processing_version=excluded.processing_version
+          processing_version=excluded.processing_version,output_json='[]'
           WHERE schedule_daily_jobs.input_hash<>excluded.input_hash
             OR (schedule_daily_jobs.processing_version<excluded.processing_version AND schedule_daily_jobs.status IN ('partial','failed'))`)
           .run(accountId, day, hash, now, scheduleProcessingVersion);
@@ -244,8 +270,6 @@ export class DailyScheduleStore {
       const [start, end] = dayRange(job.sourceDay);
       const dayKeys = this.db.prepare('SELECT key FROM messages WHERE account_id=? AND time>=? AND time<?').all(job.accountId, start, end);
       for (const row of dayKeys) this.db.prepare('DELETE FROM activity_sources WHERE message_key=?').run(row.key);
-      const usedRefs = new Set<number>();
-
       for (const item of activities) {
         const matched = this.matchingActivity(job.accountId, item.activity);
         const id = matched?.id ?? activityIdentity(job.accountId, item.activity);
@@ -256,7 +280,6 @@ export class DailyScheduleStore {
         this.db.prepare(`INSERT INTO activity_canonical(activity_id,payload) VALUES(?,?)
           ON CONFLICT(activity_id) DO UPDATE SET payload=excluded.payload`).run(id, JSON.stringify(canonical));
         for (const ref of item.sourceRefs) {
-          usedRefs.add(ref);
           const source = sources.get(ref)!;
           const reviewReasons = severeWarnings(source.warnings);
           this.db.prepare(`INSERT OR REPLACE INTO activity_sources(activity_id,message_key,payload) VALUES(?,?,?)`).run(
@@ -272,30 +295,18 @@ export class DailyScheduleStore {
       this.db.prepare('DELETE FROM activity_canonical WHERE NOT EXISTS(SELECT 1 FROM activities a WHERE a.id=activity_canonical.activity_id)').run();
       const reviewReasons = result.reviewReasons ?? [];
       const status = reviewReasons.length ? 'partial' : 'completed';
-      this.db.prepare(`UPDATE schedule_daily_jobs SET status=?,error=?,diagnostics=?,processing_version=?,updated_at=?
+      this.db.prepare(`UPDATE schedule_daily_jobs SET status=?,error=?,diagnostics=?,processing_version=?,output_json=?,updated_at=?
         WHERE account_id=? AND source_day=? AND input_hash=? AND status='running'`)
         .run(status, reviewReasons.join('；').slice(0, 800), JSON.stringify(result.warnings), scheduleProcessingVersion,
-          Date.now(), job.accountId, job.sourceDay, job.hash);
+          JSON.stringify(result.activities), Date.now(), job.accountId, job.sourceDay, job.hash);
       for (const source of job.messages) {
+        const sourceWarnings = sources.get(source.ref)?.warnings ?? [];
+        const sourceReviewReasons = severeWarnings(sourceWarnings);
+        const sourceStatus = sourceReviewReasons.length ? 'partial' : 'completed';
         this.db.prepare(`UPDATE schedule_jobs SET status=?,error=?,diagnostics=?,processing_version=?,updated_at=?
-          WHERE message_key=? AND input_hash=?`).run(status, reviewReasons.join('；').slice(0, 800),
-          JSON.stringify(result.warnings), scheduleProcessingVersion, Date.now(), source.message.key, source.contentHash);
+          WHERE message_key=? AND input_hash=?`).run(sourceStatus, sourceReviewReasons.join('；').slice(0, 800),
+          JSON.stringify(sourceWarnings), scheduleProcessingVersion, Date.now(), source.message.key, source.contentHash);
         this.db.prepare('DELETE FROM recruiting_information WHERE message_key=?').run(source.message.key);
-        if (usedRefs.has(source.ref)) continue;
-        const prepared = sources.get(source.ref)!;
-        const item = result.information.find(value => value.sourceRef === source.ref);
-        const sourceWarnings = severeWarnings(prepared.warnings);
-        if (!item && !sourceWarnings.length && !informationCandidate(source.message)) continue;
-        const materials = informationMaterials(source.message, prepared.materials);
-        const plain = source.message.text.replace(/https?:\/\/\S+/g, '').replace(/\[(?:图片|文件|卡片|链接)\]/g, '').trim();
-        const materialTitle = materials.find(material => material.title && material.title !== 'QQ 图片附件')?.title;
-        const title = item?.title || materialTitle || plain.split(/\n|[。！？!?]/).find(line => line.trim().length >= 5)?.trim()
-          || (materials.some(material => material.kind === 'file') ? '招聘附件' : materials.some(material => material.kind === 'image') ? '招聘图片与消息' : '招聘资讯');
-        this.db.prepare(`INSERT INTO recruiting_information(message_key,input_hash,category,title,summary,materials,related_messages)
-          VALUES(?,?,?,?,?,?,?) ON CONFLICT(message_key) DO UPDATE SET input_hash=excluded.input_hash,category=excluded.category,
-          title=excluded.title,summary=excluded.summary,materials=excluded.materials,related_messages=excluded.related_messages`)
-          .run(source.message.key, source.contentHash, sourceWarnings.length ? 'incomplete' : 'information', title.slice(0, 200),
-            (item?.summary || plain.replace(/\s+/g, ' ').slice(0, 1000)), JSON.stringify(materials), '[]');
       }
       return true;
     });
@@ -316,6 +327,46 @@ export class DailyScheduleStore {
         text: message.text.slice(0, 200), error: String(issue.error) }];
     });
     return status;
+  }
+
+  details(accountId: string, query: ProcessingDetailsQuery): ProcessingDetailsPage {
+    const effectiveStatus = "CASE WHEN d.status IN ('pending','running','failed') THEN d.status ELSE coalesce(j.status,d.status,'pending') END";
+    const bucketSql: Record<ProcessingMessageBucket, string> = {
+      pending: `${effectiveStatus} IN ('pending','failed')`,
+      running: `${effectiveStatus}='running'`,
+      completed: `${effectiveStatus} IN ('completed','partial')`,
+    };
+    const base = `FROM messages m JOIN groups g ON g.account_id=m.account_id AND g.id=m.group_id
+      LEFT JOIN schedule_jobs j ON j.message_key=m.key
+      LEFT JOIN schedule_daily_jobs d ON d.account_id=m.account_id AND d.source_day=date(m.time,'unixepoch','+8 hours')
+      WHERE m.account_id=? AND g.followed=1 AND m.time>=?`;
+    const count = (bucket: ProcessingMessageBucket) => Number(this.db.prepare(`SELECT count(*) AS n ${base} AND ${bucketSql[bucket]}`)
+      .get(accountId, query.since)?.n ?? 0);
+    const counts = { pending: count('pending'), running: count('running'), completed: count('completed') };
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? 100;
+    const rows = this.db.prepare(`SELECT m.key,m.time,m.text,m.payload,g.name,
+      ${effectiveStatus} AS status,CASE WHEN ${effectiveStatus}='failed' THEN coalesce(d.error,j.error,'') ELSE coalesce(j.error,'') END AS error,
+      coalesce((SELECT json_group_array(json_extract(c.payload,'$.title'))
+        FROM activity_sources s JOIN activity_canonical c ON c.activity_id=s.activity_id WHERE s.message_key=m.key),'[]') AS activity_titles
+      ${base} AND ${bucketSql[query.bucket]} ORDER BY m.time DESC,m.key DESC LIMIT ? OFFSET ?`)
+      .all(accountId, query.since, limit, offset) as Record<string, unknown>[];
+    const items = rows.map(row => {
+      const message = JSON.parse(String(row.payload)) as Message;
+      const state = String(row.status) as ProcessingMessageState;
+      return {
+        key: String(row.key), bucket: query.bucket, state, groupName: String(row.name),
+        senderName: message.senderName, messageTime: Number(row.time), text: String(row.text),
+        contentTypes: [...new Set(message.segments.map(segment => segment.type))],
+        activityTitles: JSON.parse(String(row.activity_titles)) as string[], error: String(row.error),
+      } satisfies ProcessingMessageItem;
+    });
+    return { items, total: counts[query.bucket], hasMore: offset + items.length < counts[query.bucket], counts };
+  }
+
+  structuredResult(accountId: string, sourceDay: string): DailyExtractionResult['activities'] {
+    const row = this.db.prepare('SELECT output_json FROM schedule_daily_jobs WHERE account_id=? AND source_day=?').get(accountId, sourceDay);
+    return row ? JSON.parse(String(row.output_json)) : [];
   }
 
   private transaction<T>(callback: () => T): T {

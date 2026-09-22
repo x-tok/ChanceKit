@@ -48,4 +48,11 @@ export const informationQuerySchema = z.object({
 export const scheduleQuerySchema = z.object({
   week: calendarDate, type: z.enum(activityTypes).optional(), groupId: z.string().max(160).optional(), search: z.string().max(300).optional(),
 }).strict();
-export const processingConfigSchema = z.object({ enabled: z.boolean(), concurrency: z.number().int().min(1).max(6) }).strict();
+export const processingConfigSchema = z.object({
+  enabled: z.boolean(), concurrency: z.number().int().min(1).max(6), stopWhenIdle: z.boolean().optional(),
+  since: z.number().int().min(0).optional(),
+}).strict();
+export const processingDetailsQuerySchema = z.object({
+  bucket: z.enum(['pending', 'running', 'completed']), since: z.number().int().min(0),
+  offset: z.number().int().min(0).max(1_000_000).optional(), limit: z.number().int().min(1).max(200).optional(),
+}).strict();

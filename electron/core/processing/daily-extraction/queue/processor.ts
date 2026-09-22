@@ -1,4 +1,4 @@
-import { emptyProcessingStatus, type ProcessingStatus } from '../../../../../src/schedule';
+import { emptyProcessingDetails, emptyProcessingStatus, type ProcessingDetailsPage, type ProcessingDetailsQuery, type ProcessingStatus } from '../../../../../src/schedule';
 import { isLocalModelEndpoint } from '../../../../../src/model-config';
 import type { StoredModelSettings } from '../../../models/model-settings';
 import type { DailyExtractionResult, DailyProcessingJob } from '../types';
@@ -54,7 +54,11 @@ export class DailyScheduleProcessor {
       : { ...emptyProcessingStatus, issues: [], blockedReason: '请先连接 QQ 并关注群聊。' };
   }
 
-  async configure(value: { enabled: boolean; concurrency: number }) {
+  details(query: ProcessingDetailsQuery): ProcessingDetailsPage {
+    return this.accountId ? this.store.details(this.accountId, query) : { ...emptyProcessingDetails, items: [] };
+  }
+
+  async configure(value: { enabled: boolean; concurrency: number; stopWhenIdle?: boolean; since?: number }) {
     if (!this.accountId) throw new Error('请先连接 QQ 并关注群聊。');
     const account = this.accountId;
     if (value.enabled) {
@@ -103,7 +107,7 @@ export class DailyScheduleProcessor {
       const config = this.store.settings(account);
       while (config.enabled && this.running.size < config.concurrency) {
         const job = this.store.claim(account);
-        if (!job) break;
+        if (!job) { this.store.stopWhenIdle(account); break; }
         const controller = new AbortController();
         const active = { job, controller, promise: Promise.resolve() };
         this.running.set(job.key, active);
@@ -118,6 +122,7 @@ export class DailyScheduleProcessor {
             else this.store.fail(job, error instanceof Error ? error.message : '当日消息处理失败。');
           } finally {
             this.running.delete(job.key);
+            this.store.stopWhenIdle(account);
             if (!this.closed) { this.publish(); this.wake(); }
           }
         }).catch(() => { this.blockedReason = '处理结果未能写入本地，请检查磁盘空间并重启。'; });

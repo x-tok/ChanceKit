@@ -94,7 +94,8 @@ export class ScheduleStore {
     return { enabled: Boolean(row?.enabled), concurrency: Number(row?.concurrency ?? 3) };
   }
   configure(accountId: string, value: { enabled: boolean; concurrency: number }) {
-    this.db.prepare('INSERT INTO schedule_settings VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET enabled=excluded.enabled,concurrency=excluded.concurrency')
+    this.db.prepare(`INSERT INTO schedule_settings(account_id,enabled,concurrency) VALUES(?,?,?)
+      ON CONFLICT(account_id) DO UPDATE SET enabled=excluded.enabled,concurrency=excluded.concurrency`)
       .run(accountId, Number(value.enabled), value.concurrency);
   }
   enqueue(accountId: string) {

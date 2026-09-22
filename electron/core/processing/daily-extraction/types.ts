@@ -38,16 +38,10 @@ export interface PreparedDailySource extends DailyMessageSource {
 export interface DailyExtractedActivity extends ActivityInput {
   sourceRefs: number[];
 }
-
-export interface DailyRecruitingInformation {
-  sourceRef: number;
-  title: string;
-  summary: string;
-}
+export type DailyActivityOutput = DailyExtractedActivity[];
 
 export interface DailyExtractionResult {
-  activities: DailyExtractedActivity[];
-  information: DailyRecruitingInformation[];
+  activities: DailyActivityOutput;
   sources: PreparedDailySource[];
   warnings: string[];
   reviewReasons?: string[];

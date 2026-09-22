@@ -4,7 +4,7 @@ import { ExtractionFailure } from '../../extraction-failure';
 import { buildDailyPromptPayload, DAILY_EXTRACTION_SYSTEM_PROMPT } from './prompt';
 import { buildDailySources } from './source-builder';
 import { createDailyAgentTools } from './tools/index';
-import type { DailyExtractedActivity, DailyExtractionOptions, DailyExtractionResult, DailyProcessingJob, DailyRecruitingInformation, PreparedDailySource } from '../types';
+import type { DailyActivityOutput, DailyExtractedActivity, DailyExtractionOptions, DailyExtractionResult, DailyProcessingJob, PreparedDailySource } from '../types';
 
 const MAX_PROMPT_CHARS = 220_000;
 
@@ -27,11 +27,11 @@ export function splitDailySources(sources: PreparedDailySource[], maxChars = MAX
 
 async function extractChunk(
   sourceDay: string, sources: PreparedDailySource[], settings: StoredModelSettings, options: DailyExtractionOptions,
-): Promise<{ activities: DailyExtractedActivity[]; information: DailyRecruitingInformation[] }> {
+): Promise<DailyActivityOutput> {
   const agent = createConfiguredPiAgent(settings, {
     fetch: options.fetch, signal: options.signal, systemPrompt: DAILY_EXTRACTION_SYSTEM_PROMPT, timeoutMs: 120_000,
   });
-  let captured: { activities: DailyExtractedActivity[]; information: DailyRecruitingInformation[] } | undefined;
+  let captured: DailyActivityOutput | undefined;
   let turns = 0;
   agent.shouldStopAfterTurn = () => captured !== undefined || ++turns >= 4;
   agent.state.tools = createDailyAgentTools({
@@ -68,16 +68,14 @@ export async function extractDailyActivities(
   try {
     sources = await buildDailySources(job.messages, settings, runOptions);
     const activities: DailyExtractedActivity[] = [];
-    const information: DailyRecruitingInformation[] = [];
     const promptBudget = Math.min(MAX_PROMPT_CHARS, Math.max(40_000, Math.floor(settings.config.contextWindow * 1.2)));
     for (const chunk of splitDailySources(sources, promptBudget)) {
       const extracted = await extractChunk(job.sourceDay, chunk, settings, runOptions);
-      activities.push(...extracted.activities);
-      information.push(...extracted.information);
+      activities.push(...extracted);
     }
     const warnings = [...new Set(sources.flatMap(source => source.warnings))];
     const reviewReasons = warnings.filter(warning => /未读取|未展开|不支持|缺少可读取|无法辨认|读取失败|内容可能不完整|需核对原图/.test(warning));
-    return { activities, information, sources, warnings, reviewReasons };
+    return { activities, sources, warnings, reviewReasons };
   } catch (error) {
     if (options.signal.aborted) throw options.signal.reason;
     if (signal.aborted) throw new ExtractionFailure('当日消息处理超时，将按队列策略重试。', sources.flatMap(source => source.materials));
