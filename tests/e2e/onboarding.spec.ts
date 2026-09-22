@@ -126,15 +126,24 @@ test('first-run onboarding completes QQ, DeepSeek and bounded group sync', async
   } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
 });
 
-test('Windows onboarding offers the official download without the macOS copy confirmation', async () => {
+test('Windows onboarding requires message sync and QQ exit before continuing', async () => {
   const server = await preview({ preview: { host: '127.0.0.1', port: 5199, strictPort: false } });
   const browser = await chromium.launch({ channel: 'chrome' });
   const page = await browser.newPage({ viewport: { width: 320, height: 700 } });
   try {
     await page.addInitScript(() => {
       const state: AppState = { phase: 'idle', detail: '', runtime: null, groups: [], archived: 0, historyBusy: false, logs: [] };
+      let listener: ((event: AppEvent) => void) | undefined;
+      Object.assign(window, { installQQ: () => {
+        state.qq = { path: 'C:\\Program Files\\Tencent\\QQNT\\QQ.exe', version: '9.9.21', architecture: 'x64', platform: 'win32' };
+      } });
       window.desktop = {
-        platform: 'win32', onboardingStatus: async () => ({ completed: false }), request: async () => state, subscribe: () => () => {},
+        platform: 'win32', onboardingStatus: async () => ({ completed: false }),
+        request: async (command: Command) => {
+          if (command.type === 'detect') listener?.({ type: 'state', state: structuredClone(state) });
+          return structuredClone(state);
+        },
+        subscribe: (callback: (event: AppEvent) => void) => { listener = callback; return () => { listener = undefined; }; },
         chooseQQ: async () => null, openQQDownload: async () => {}, modelSettings: async () => ({ config: null, hasApiKey: false, updatedAt: null, encryptionAvailable: true }),
       } as unknown as DesktopBridge;
     });
@@ -143,5 +152,31 @@ test('Windows onboarding offers the official download without the macOS copy con
     await expect(page.getByText('我已正常退出官方 QQ', { exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: 'test-results/onboarding-windows-320.png' });
+    await page.evaluate(() => (window as unknown as { installQQ(): void }).installQQ());
+    await page.getByRole('button', { name: '重新检测' }).click();
+    const synced = page.getByLabel('我已完成登录与消息同步');
+    const exited = page.getByLabel('我已正常退出官方 QQ');
+    const next = page.getByRole('button', { name: /继续设置 AI 服务/ });
+    await expect(page.getByText(/只关闭窗口不会退出 QQ/)).toBeVisible();
+    await expect(page.getByText(/约 1 GB/)).toHaveCount(0);
+    await expect(exited).toBeDisabled();
+    await expect(next).toBeDisabled();
+    await synced.check();
+    await expect(exited).toBeEnabled();
+    await expect(next).toBeDisabled();
+    await exited.check();
+    await expect(next).toBeEnabled();
+    await synced.uncheck();
+    await expect(exited).not.toBeChecked();
+    await expect(exited).toBeDisabled();
+    await expect(next).toBeDisabled();
+    await synced.check();
+    await expect(next).toBeDisabled();
+    await exited.check();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.setViewportSize({ width: 1280, height: 820 });
+    await page.screenshot({ path: 'test-results/onboarding-windows-ready-1280.png' });
+    await next.click();
+    await expect(page.getByLabel('AI 服务')).toBeVisible();
   } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
 });
