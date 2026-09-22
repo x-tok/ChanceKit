@@ -79,6 +79,8 @@ export interface ProcessingStatus {
   enabled: boolean;
   stopWhenIdle?: boolean;
   since?: number;
+  lastSyncedAt?: number;
+  groupLastSyncedAt?: Record<string, number>;
   concurrency: number;
   pending: number;
   running: number;
@@ -122,7 +124,7 @@ export const emptyProcessingDetails: ProcessingDetailsPage = {
 export const scheduleProcessingVersion = 5;
 export const emptyProcessingStatus: ProcessingStatus = {
   processorVersion: scheduleProcessingVersion,
-  enabled: false, concurrency: 3, pending: 0, running: 0, completed: 0, partial: 0, failed: 0, issues: [],
+  enabled: false, concurrency: 3, groupLastSyncedAt: {}, pending: 0, running: 0, completed: 0, partial: 0, failed: 0, issues: [],
 };
 
 export function chinaToday(now = new Date()): string {

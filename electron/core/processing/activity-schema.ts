@@ -50,7 +50,9 @@ export const scheduleQuerySchema = z.object({
 }).strict();
 export const processingConfigSchema = z.object({
   enabled: z.boolean(), concurrency: z.number().int().min(1).max(6), stopWhenIdle: z.boolean().optional(),
-  since: z.number().int().min(0).optional(),
+  since: z.number().int().min(0).optional(), syncedThrough: z.number().int().min(0).optional(),
+  syncedGroupIds: z.array(z.string().min(1).max(160)).max(10_000).optional(),
+  expectedAccountId: z.string().min(1).max(160).optional(),
 }).strict();
 export const processingDetailsQuerySchema = z.object({
   bucket: z.enum(['pending', 'running', 'completed', 'review']), since: z.number().int().min(0),
