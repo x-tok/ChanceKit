@@ -15,6 +15,7 @@ export async function mockNapCat() {
   let account = { user_id: 100010001, nickname: '见机测试账号' };
   const held = new Map<string, (reply: () => void) => void>();
   let qrRefreshed = 0;
+  let completeHistoryAtBoundary = false;
   const server = createServer(async (req, res) => {
     let data = '';
     for await (const chunk of req) data += chunk;
@@ -50,7 +51,10 @@ export async function mockNapCat() {
       ]);
       if (action === 'get_group_msg_history') {
         if (params.group_id === '731234569') return socket.send(JSON.stringify({ status: 'failed', retcode: 1200, wording: '消息undefined不存在', echo }));
-        if (params.message_seq === '1') return socket.send(JSON.stringify({ status: 'failed', retcode: 1200, wording: '消息1不存在', echo }));
+        if (params.message_seq === '1') {
+          if (completeHistoryAtBoundary) return ok({ messages: [{ ...sample(0, '三天前的范围外消息'), time: 1789732800 }] });
+          return socket.send(JSON.stringify({ status: 'failed', retcode: 1200, wording: '消息1不存在', echo }));
+        }
         if (params.message_seq && !params.reverse_order) return ok({ messages: [sample(Number(params.message_seq), '锚点本身'), sample(Number(params.message_seq) + 1, '较新的消息')] });
         return ok({ messages: params.message_seq ? [sample(1, '较早的双选会通知。'), sample(2, '请关注学校就业中心的后续通知。')] : [
           sample(3, '【校园宣讲会】\n时间：9 月 24 日 14:30\n地点：大学生活动中心 201 室\n请带上简历，现场安排交流与答疑。'),
@@ -71,6 +75,7 @@ export async function mockNapCat() {
   return {
     config: { wsUrl: `ws://127.0.0.1:${port}`, accessToken: 'test-onebot', webuiUrl: `http://127.0.0.1:${port}`, webuiToken: 'test-management' }, calls,
     respond: (action: string, response: (params: any) => unknown) => { responses.set(action, response); },
+    completeHistoryAtBoundary: () => { completeHistoryAtBoundary = true; },
     setLoggedIn: (value: boolean) => { loggedIn = value; },
     setAccount: (value: typeof account) => { account = value; },
     holdNext: (action: string) => {

@@ -7,6 +7,7 @@ import { preview } from 'vite';
 
 test('desktop connects to NapCat, archives history and live messages, and renders window sizes', async () => {
   const fixture = await mockNapCat();
+  fixture.completeHistoryAtBoundary();
   const folder = await mkdtemp(path.join(os.tmpdir(), 'chancekit-e2e-'));
   const env: Record<string, string> = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
   delete env.ELECTRON_RUN_AS_NODE;
@@ -45,7 +46,6 @@ test('desktop connects to NapCat, archives history and live messages, and render
     fixture.push(sample(6, '实时消息已通过 WebSocket 到达（测试）。'));
     await expect(page.getByText('实时消息已通过 WebSocket 到达（测试）。', { exact: true })).toBeVisible();
     await page.screenshot({ path: 'test-results/messages-desktop.png' });
-    await page.getByRole('button', { name: '从 QQ 获取更早记录' }).click();
     await expect(page.getByText('较早的双选会通知。', { exact: true })).toBeVisible();
     await page.getByLabel('搜索本地消息').fill('校园宣讲会');
     await expect(page.locator('article')).toHaveCount(1);

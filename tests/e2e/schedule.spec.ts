@@ -27,6 +27,7 @@ const ongoingEvent: ActivityInput = {
 
 test('schedule extracts followed messages with concurrent pi agents, persists activities and supports weekly filters and sources', async () => {
   const fixture = await mockNapCat();
+  fixture.completeHistoryAtBoundary();
   const root = await mkdtemp(path.join(os.tmpdir(), 'chancekit-schedule-e2e-'));
   let requests = 0, active = 0, peak = 0, visionCalls = 0;
   const endpoint = createServer(async (request, response) => {
