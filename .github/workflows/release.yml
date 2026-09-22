@@ -27,6 +27,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Require recorded NapCat redistribution permission
+        run: |
+          test -f licenses/NapCatQQ-AUTHORIZATION.md
+          grep -q '^Authorization-Status: granted$' licenses/NapCatQQ-AUTHORIZATION.md
       - name: Validate version and check for an existing release
         id: plan
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7

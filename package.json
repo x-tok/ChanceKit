@@ -4,6 +4,7 @@
   "version": "0.1.2",
   "description": "ChanceKit - 不让机会淹没在消息里",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "main": "dist-electron/main.cjs",
   "engines": {
@@ -73,7 +74,12 @@
     "files": [
       "dist/**",
       "dist-electron/**",
-      "package.json"
+      "package.json",
+      "LICENSE",
+      "PRIVACY.md",
+      "DISCLAIMER.md",
+      "THIRD_PARTY_NOTICES.md",
+      "licenses/**"
     ],
     "extraResources": [
       {
@@ -84,6 +90,10 @@
           "manifest.json",
           "NOTICE.md"
         ]
+      },
+      {
+        "from": "licenses/NapCatQQ-v4.18.28-LICENSE.txt",
+        "to": "napcat/LICENSE.txt"
       }
     ],
     "beforePack": "scripts/before-pack.cjs",

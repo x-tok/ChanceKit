@@ -13,7 +13,17 @@ const archive = path.join(appOut, 'app.asar');
 const packaged = JSON.parse(extractFile(archive, 'package.json').toString());
 assert.equal(packaged.name, pkg.name);
 assert.equal(packaged.version, pkg.version);
-for (const entry of ['dist/index.html', 'dist-electron/main.cjs', 'dist-electron/preload.cjs', 'dist-electron/worker.cjs']) {
+for (const entry of [
+  'dist/index.html',
+  'dist-electron/main.cjs',
+  'dist-electron/preload.cjs',
+  'dist-electron/worker.cjs',
+  'LICENSE',
+  'PRIVACY.md',
+  'DISCLAIMER.md',
+  'THIRD_PARTY_NOTICES.md',
+  'licenses/NapCatQQ-v4.18.28-LICENSE.txt',
+]) {
   assert.ok(extractFile(archive, entry).length > 0, `Missing packaged entry: ${entry}`);
 }
 for (const entry of listPackage(archive)) {
@@ -25,6 +35,10 @@ assert.deepEqual(
   JSON.parse(await readFile('resources/napcat/manifest.json', 'utf8')),
 );
 assert.ok((await readFile(path.join(appOut, 'napcat/NOTICE.md'), 'utf8')).length > 0);
+assert.deepEqual(
+  await readFile(path.join(appOut, 'napcat/LICENSE.txt')),
+  await readFile('licenses/NapCatQQ-v4.18.28-LICENSE.txt'),
+);
 if (process.platform === 'darwin') {
   execFileSync('codesign', ['--verify', '--deep', '--strict', path.resolve(appOut, '../..')], { stdio: 'inherit' });
 }

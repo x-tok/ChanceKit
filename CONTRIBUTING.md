@@ -1,5 +1,7 @@
 # 参与 ChanceKit
 
+除文件另有明确许可标记外，提交贡献即表示贡献者有权提交相关内容，并同意该贡献按照项目当前的 [PolyForm Noncommercial 1.0.0](LICENSE) 提供。不要提交无法按该许可发布的第三方代码、素材或数据。
+
 ## 开发与验证
 
 使用 Node.js 24 或更新版本。在仓库根目录执行 `npm ci` 和 `npm run prepare:napcat`，然后按 [README](README.md) 运行开发环境。
@@ -40,8 +42,10 @@ git diff --cached
 
 NapCat ZIP 由构建前准备步骤下载和校验，不提交到源码仓库。不要用自己的 NapCat 运行目录、QQ 安装副本或已登录配置制作分发组件。公开反馈、PR 描述和构建附件同样需要检查敏感信息。
 
+公开发布包含 NapCatQQ 的安装包前，必须确认仓库已经记录适用于该版本和分发方式的书面授权，并附带 `LICENSE`、`PRIVACY.md`、`DISCLAIMER.md`、`THIRD_PARTY_NOTICES.md` 及 NapCatQQ 原始许可证。第三方组件不能被重新授权为 ChanceKit 的许可证。
+
 ## 兼容性与打包
 
-涉及 QQ 接入的修改应核对 [接入说明](docs/integration.md) 和 [验证范围](docs/validation.md)。代码应保留本地归档与当前登录状态的区别；重建运行组件不能删除账号资料或业务数据库。
+涉及 QQ 接入的修改应核对 [接入说明](docs/integration.md)。代码应保留本地归档与当前登录状态的区别；重建运行组件不能删除账号资料或业务数据库。
 
 Windows 与 macOS 的原生进程和资料路径不同，不能用单个平台或模拟服务的结果宣称全平台通过。`npm run package` 与 `npm run dist` 只生成本地产物，不自动发布。
