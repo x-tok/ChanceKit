@@ -10,8 +10,8 @@ import { NapCatManagement } from '../electron/core/connection/management';
 import { validateEndpoint } from '../electron/core/connection/validation';
 import { AppService } from '../electron/core/application/service';
 import { mockNapCat, sample } from './fixtures';
-import type { AppState, HistoryResult, MessagePage } from '../src/shared';
-import { initialSyncWindow } from '../src/onboarding/initial-sync';
+import type { AppState, Command, HistoryResult, MessagePage } from '../src/shared';
+import { historySyncStart, initialSyncWindow, runInitialSync } from '../src/onboarding/initial-sync';
 
 test('Initial sync starts at midnight in Shanghai three calendar days earlier', () => {
   assert.deepEqual(initialSyncWindow(new Date('2026-09-21T15:59:59Z')), {
@@ -22,6 +22,31 @@ test('Initial sync starts at midnight in Shanghai three calendar days earlier', 
     date: '2026-09-19',
     since: Date.parse('2026-09-19T00:00:00+08:00') / 1000,
   });
+});
+
+test('later syncs use the saved account watermark with a bounded overlap', () => {
+  const now = new Date('2026-09-22T12:00:00Z');
+  assert.equal(historySyncStart(0, now), initialSyncWindow(now).since);
+  assert.equal(historySyncStart(1_800_000_000, now), 1_799_999_700);
+});
+
+test('history sync uses an independent watermark for each followed group', async () => {
+  const state: AppState = {
+    phase: 'online', detail: '', runtime: 'managed', archived: 0, historyBusy: false, logs: [],
+    account: { id: '10001', nickname: '测试账号' },
+    groups: [
+      { id: 'group-a', name: '已同步群', memberCount: 1, maxMembers: 1, followed: true, messageCount: 0 },
+      { id: 'group-b', name: '新关注群', memberCount: 1, maxMembers: 1, followed: true, messageCount: 0 },
+    ],
+  };
+  const starts = new Map<string, number>();
+  await runInitialSync(state, groupId => groupId === 'group-a' ? 200 : 100, {
+    request: async <T,>(command: Command) => {
+      if (command.type === 'history') starts.set(command.groupId, command.since!);
+      return { added: 0, received: 0, canContinue: false, boundary: 'empty', reachedStart: true } as T;
+    },
+  }, () => {});
+  assert.deepEqual(Object.fromEntries(starts), { 'group-a': 200, 'group-b': 100 });
 });
 
 test('OneBot correlates out-of-order replies and keeps group events separate', async () => {

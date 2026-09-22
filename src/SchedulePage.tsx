@@ -7,7 +7,7 @@ import s from './Schedule.module.css';
 import common from './App.module.css';
 import { SourceMaterials } from './SourceMaterials';
 import { CalendarMessage } from './CalendarMessage';
-import { initialSyncWindow, runInitialSync, type InitialSyncProgress } from './onboarding/initial-sync';
+import { historySyncStart, initialSyncWindow, runInitialSync, type InitialSyncProgress } from './onboarding/initial-sync';
 import { SyncDialog } from './schedule-sync/SyncDialog';
 
 const weekday = (day: string) => ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date(`${day}T00:00:00Z`).getUTCDay()];
@@ -50,8 +50,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   const accountId = online ? state.account?.id : undefined;
   const readingMessages = Boolean(syncProgress);
   const organizing = status.enabled || status.running > 0;
-  const queueTotal = status.pending + status.running + status.completed + status.partial + status.failed;
-  const syncSettled = !readingMessages && !organizing && queueTotal > 0 && status.pending === 0;
+  const hasSynced = Boolean(status.lastSyncedAt);
   const syncSince = status.since || initialSyncWindow().since;
   const refresh = useCallback(() => setRevision(value => value + 1), []);
   const jumpTo = (day: string) => { setAnchor(day); setSelectedDate(day); };
@@ -98,16 +97,20 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   };
   const startSync = async () => {
     if (!state.account || state.phase !== 'online') { setSyncError('请先在设置中登录 QQ，再开始同步。'); return; }
+    const expectedAccountId = state.account.id;
     const controller = new AbortController();
     syncController.current?.abort(); syncController.current = controller;
     setBusy(true); setSyncError('');
     setSyncProgress({ completed: 0, total: groups.length, group: '', added: 0 });
     try {
       const window = initialSyncWindow();
-      await runInitialSync(state, window.since, bridge, setSyncProgress, controller.signal);
+      const syncStartedAt = Math.floor(Date.now() / 1000);
+      await runInitialSync(state, groupId => historySyncStart(status.groupLastSyncedAt?.[groupId]), bridge, setSyncProgress, controller.signal);
       controller.signal.throwIfAborted();
       setSyncProgress(undefined);
-      setStatus(await bridge.configureProcessing({ enabled: true, concurrency: 3, stopWhenIdle: true, since: window.since }));
+      setStatus(await bridge.configureProcessing({ enabled: true, concurrency: 3, stopWhenIdle: true,
+        since: status.since || window.since, syncedThrough: syncStartedAt,
+        syncedGroupIds: groups.map(group => group.id), expectedAccountId }));
       refresh();
     } catch (error) {
       if (!controller.signal.aborted) setSyncError(errorText(error));
@@ -126,10 +129,12 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   };
   const retrySync = async (messageKeys: string[]) => {
     if (!messageKeys.length) return;
+    const expectedAccountId = state.account?.id;
+    if (!expectedAccountId) { setSyncError('请先登录 QQ，再重试消息。'); return; }
     setBusy(true); setSyncError('');
     try {
       for (const key of new Set(messageKeys)) await bridge.retryProcessing(key);
-      setStatus(await bridge.configureProcessing({ enabled: true, concurrency: 3, stopWhenIdle: true, since: syncSince }));
+      setStatus(await bridge.configureProcessing({ enabled: true, concurrency: 3, stopWhenIdle: true, since: syncSince, expectedAccountId }));
       refresh();
     } catch (error) { setSyncError(errorText(error)); }
     finally { setBusy(false); }
@@ -176,7 +181,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
         <span className={s.syncAction} tabIndex={syncUnavailableReason ? 0 : undefined}>
           <button className={common.primaryButton} disabled={Boolean(syncUnavailableReason)} onClick={() => setSyncOpen(true)} aria-describedby={syncUnavailableReason ? 'schedule-sync-unavailable' : undefined}>
             {readingMessages || organizing ? <LoaderCircle size={15} className={common.spin} /> : <CloudDownload size={15} />}
-            {readingMessages || organizing ? '查看同步进度' : syncSettled ? '再次同步' : '开始同步'}
+            {readingMessages || organizing ? '查看同步进度' : hasSynced ? '同步新增消息' : '开始同步'}
           </button>
           {syncUnavailableReason && <span id="schedule-sync-unavailable" className={s.actionTooltip} role="tooltip">{syncUnavailableReason}</span>}
         </span>

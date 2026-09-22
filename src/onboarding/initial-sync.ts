@@ -1,5 +1,14 @@
 import type { AppState, DesktopBridge, HistoryResult } from '../shared';
 export { recentHistoryWindow as initialSyncWindow, type RecentHistoryWindow as InitialSyncWindow } from '../history-window';
+import { recentHistoryWindow } from '../history-window';
+
+const INCREMENTAL_SYNC_OVERLAP_SECONDS = 5 * 60;
+
+export function historySyncStart(lastSyncedAt = 0, now = new Date()): number {
+  return lastSyncedAt > 0
+    ? Math.max(0, lastSyncedAt - INCREMENTAL_SYNC_OVERLAP_SECONDS)
+    : recentHistoryWindow(now).since;
+}
 
 export interface InitialSyncProgress {
   completed: number;
@@ -24,7 +33,7 @@ export async function saveGroupSelection(
 
 export async function runInitialSync(
   state: AppState,
-  since: number,
+  since: number | ((groupId: string) => number),
   desktop: Pick<DesktopBridge, 'request'>,
   report: (progress: InitialSyncProgress) => void,
   signal?: AbortSignal,
@@ -38,9 +47,10 @@ export async function runInitialSync(
     signal?.throwIfAborted();
     report({ completed: index, total: groups.length, group: group.name, added: totalAdded });
     let older = false;
+    const groupSince = typeof since === 'function' ? since(group.id) : since;
     while (true) {
       signal?.throwIfAborted();
-      const result = await desktop.request<HistoryResult>({ type: 'history', groupId: group.id, older, since });
+      const result = await desktop.request<HistoryResult>({ type: 'history', groupId: group.id, older, since: groupSince });
       totalAdded += result.added;
       report({ completed: index, total: groups.length, group: group.name, added: totalAdded });
       if (result.reachedStart || !result.canContinue) break;

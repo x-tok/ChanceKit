@@ -78,7 +78,8 @@ export function SyncDialog({ open, onClose, status, progress, since, groups, bus
   const organizing = status.enabled || status.running > 0;
   const totalJobs = status.pending + status.running + status.completed + status.partial + status.failed;
   const doneJobs = status.completed + status.partial + status.failed;
-  const settled = !reading && !organizing && totalJobs > 0 && status.pending === 0;
+  const hasSynced = Boolean(status.lastSyncedAt);
+  const settled = !reading && !organizing && status.pending === 0 && (totalJobs > 0 || hasSynced);
   const issueJobs = status.partial + status.failed;
   const hasIssues = issueJobs > 0;
   const percent = reading
@@ -114,7 +115,8 @@ export function SyncDialog({ open, onClose, status, progress, since, groups, bus
     ? `正在读取 ${progress!.group || '群聊记录'}，本次新增 ${progress!.added.toLocaleString()} 条消息`
     : organizing ? 'AI 正在按日期读取文字、链接和图片，完成后会自动停止'
       : hasIssues && settled ? '日程已经更新，未完整处理的内容已单独列出，请核对后重试'
-        : settled ? '日程已经更新，后续新消息需要手动再次同步' : '读取最近三天的关注群消息，并整理成日程';
+        : settled ? '日程已经更新，后续可手动同步新增消息'
+          : hasSynced ? '读取上次同步后的新增消息，并整理成日程' : '读取最近三天的关注群消息，并整理成日程';
   const empty = bucket === 'pending' ? '没有待整理的消息' : bucket === 'running' ? '当前没有正在整理的消息'
     : bucket === 'review' ? '没有需要处理的消息' : '还没有整理完成的消息';
 
@@ -170,7 +172,7 @@ export function SyncDialog({ open, onClose, status, progress, since, groups, bus
       <p><strong>同步会产生 API 费用，请留意账户额度。</strong><span>每次完成后自动停止。</span></p>
       {reading || organizing ? <button className={s.stopButton} disabled={busy && !reading} onClick={onStop}><Square size={14} />停止同步</button>
         : <span className={s.disabledAction} tabIndex={startDisabledReason ? 0 : undefined}>
-          <button className={common.primaryButton} disabled={Boolean(startDisabledReason)} aria-describedby={startDisabledReason ? 'sync-start-unavailable' : undefined} onClick={onStart}><CloudDownload size={15} />{settled ? '再次同步' : '开始同步'}</button>
+          <button className={common.primaryButton} disabled={Boolean(startDisabledReason)} aria-describedby={startDisabledReason ? 'sync-start-unavailable' : undefined} onClick={onStart}><CloudDownload size={15} />{hasSynced ? '同步新增消息' : '开始同步'}</button>
           {startDisabledReason && <span id="sync-start-unavailable" className={s.actionTooltip} role="tooltip">{startDisabledReason}</span>}
         </span>}
     </footer>

@@ -71,12 +71,12 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     const startOneTimeSync = async () => {
-      const button = page.getByRole('button', { name: /^(开始同步|再次同步)$/ });
+      const button = page.getByRole('button', { name: /^(开始同步|同步新增消息)$/ });
       await expect(button).toBeEnabled();
       await button.click();
       const dialog = page.getByRole('dialog');
       await expect(dialog).toContainText('同步会产生 API 费用');
-      await dialog.getByRole('button', { name: '开始同步', exact: true }).click();
+      await dialog.getByRole('button', { name: /^(开始同步|同步新增消息)$/ }).click();
     };
     const closeSyncDetails = async () => {
       const close = page.getByRole('button', { name: '关闭同步详情', exact: true });
@@ -242,11 +242,10 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     await app.close();
     app = await electron.launch({ args: ['.'], env });
     page = await app.firstWindow();
-    await page.evaluate(config => window.desktop!.request({ type: 'connect', config }), fixture.config);
     await expect(page.getByText('已连接', { exact: true })).toBeVisible({ timeout: 15_000 });
     await page.getByRole('button', { name: '日程', exact: true }).click();
     await page.getByLabel('跳转日期').fill('2026-09-24');
-    await expect(page.getByRole('button', { name: '开始同步', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '同步新增消息', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '查看活动：星河科技校园宣讲会', exact: true })).toBeVisible();
     await expect(page.getByRole('region', { name: '跨期事项' })).toContainText(ongoingEvent.title);
     expect(requests).toBe(disconnectedRequests);
@@ -373,7 +372,7 @@ test('completed sync identifies every date batch that still needs review', async
     groups: [{ id: '731234567', name: '东南大学重点单位就业信息交流群', memberCount: 100, maxMembers: 500, followed: true, messageCount: 184 }],
   };
   const status = {
-    ...emptyProcessingStatus, since: 1, completed: 3, partial: 1,
+    ...emptyProcessingStatus, since: 1, lastSyncedAt: Date.parse('2026-09-21T12:00:00Z') / 1000, completed: 3, partial: 1,
     issues: [{ sourceDay: '2026-09-21', messageKey: 'message-1', status: 'partial' as const,
       groupName: '东南大学重点单位就业信息交流群', messageCount: 46,
       text: '纳睿雷达2027校园招聘宣讲会，部分信息见图片。', error: '第 2 张图片无法读取，请核对原始消息。' }],
@@ -399,7 +398,7 @@ test('completed sync identifies every date batch that still needs review', async
       } as unknown as DesktopBridge;
     }, { state, status, details, reviewItem });
     await page.goto(server.resolvedUrls!.local[0]);
-    await page.getByRole('button', { name: '再次同步', exact: true }).click();
+    await page.getByRole('button', { name: '同步新增消息', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('heading', { name: '同步结束，1 个日期批次需处理' })).toBeVisible();
     await expect(dialog.getByRole('list', { name: '同步阶段' })).toContainText('需处理');
