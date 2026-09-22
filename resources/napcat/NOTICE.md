@@ -5,7 +5,11 @@ Source: https://github.com/NapNeko/NapCatQQ/tree/v4.18.28
 Release: https://github.com/NapNeko/NapCatQQ/releases/tag/v4.18.28
 Upstream license: https://github.com/NapNeko/NapCatQQ/blob/v4.18.28/LICENSE
 
-The project owner handles upstream redistribution permission separately.
+The full upstream license is included as LICENSE.txt beside the packaged archive.
+Additional written permission for ChanceKit's bundled redistribution is pending
+confirmation from the main NapCatQQ author. Do not publish the bundled installer
+until that permission is recorded.
+
 NapCat and its included dependencies retain their upstream licenses and notices.
 The archive contains no user profiles, credentials or runtime caches.
 
