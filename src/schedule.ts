@@ -77,6 +77,8 @@ export interface ProcessingStatus {
   processorVersion?: number;
   incompleteInformation?: number;
   enabled: boolean;
+  stopWhenIdle?: boolean;
+  since?: number;
   concurrency: number;
   pending: number;
   running: number;
@@ -86,7 +88,38 @@ export interface ProcessingStatus {
   blockedReason?: string;
   issues: { messageKey: string; groupName: string; text: string; error: string; status: 'failed' | 'partial' }[];
 }
-export const scheduleProcessingVersion = 2;
+export type ProcessingMessageBucket = 'pending' | 'running' | 'completed';
+export type ProcessingMessageState = 'pending' | 'running' | 'completed' | 'partial' | 'failed';
+export interface ProcessingMessageItem {
+  key: string;
+  bucket: ProcessingMessageBucket;
+  state: ProcessingMessageState;
+  groupName: string;
+  senderName: string;
+  messageTime: number;
+  text: string;
+  contentTypes: string[];
+  images: { segmentIndex: number; url?: string }[];
+  links: { url: string; title: string }[];
+  activityTitles: string[];
+  error: string;
+}
+export interface ProcessingDetailsQuery {
+  bucket: ProcessingMessageBucket;
+  since: number;
+  offset?: number;
+  limit?: number;
+}
+export interface ProcessingDetailsPage {
+  items: ProcessingMessageItem[];
+  total: number;
+  hasMore: boolean;
+  counts: Record<ProcessingMessageBucket, number>;
+}
+export const emptyProcessingDetails: ProcessingDetailsPage = {
+  items: [], total: 0, hasMore: false, counts: { pending: 0, running: 0, completed: 0 },
+};
+export const scheduleProcessingVersion = 3;
 export const emptyProcessingStatus: ProcessingStatus = {
   processorVersion: scheduleProcessingVersion,
   enabled: false, concurrency: 3, pending: 0, running: 0, completed: 0, partial: 0, failed: 0, issues: [],

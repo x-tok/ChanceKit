@@ -1,5 +1,9 @@
 .page { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
 .page[hidden] { display: none; }
+.embedded { display: block; flex: none; overflow: visible; }
+.embedded .scroll { overflow: visible; padding: 0; }
+.embedded .content { max-width: none; }
+.embedded .footer { padding: 16px 0 0; background: transparent; }
 .scroll { flex: 1; min-height: 0; overflow: auto; padding: 34px 48px 24px; }
 .content { max-width: 1000px; margin: 0 auto; }
 .heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 21px; }
@@ -28,6 +32,7 @@
 .keyInput:focus-within { outline: 2px solid var(--green); outline-offset: 3px; }
 .fields .keyInput input:not([type='checkbox']):not([type='range']) { height: 40px; border: 0; background: none; flex: 1; }
 .keyInput input:focus-visible { outline: none; }
+.maskedKey { -webkit-text-security: disc; }
 .keyStatus { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 9px; font-size: 11px; color: var(--muted); min-height: 18px; }
 .keyStatus span { display: inline-flex; align-items: center; gap: 6px; }
 .keyStatus button { border: 0; background: none; color: var(--danger); font-size: 11px; padding: 2px 0; }

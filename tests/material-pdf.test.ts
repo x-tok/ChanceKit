@@ -2,11 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import { pdfFixture } from './pdf-fixtures';
-import { readDocumentMaterial } from '../electron/core/material-document';
-import { collectMessageMaterials } from '../electron/core/message-materials';
-import { normalizeMessage } from '../electron/core/store';
+import { readDocumentMaterial } from '../electron/core/materials/material-document';
+import { collectMessageMaterials } from '../electron/core/materials/message-materials';
+import { normalizeMessage } from '../electron/core/archive/store';
 import { sample } from './fixtures';
-import { readPdfMaterial } from '../electron/core/material-pdf';
+import { readPdfMaterial } from '../electron/core/materials/material-pdf';
 
 const signal = () => new AbortController().signal;
 test('PDF text and exact annotations are read without OCR or fetching annotation targets', async () => {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { resolveProfileDirectory } from '../electron/core/profile';
+import { resolveProfileDirectory } from '../electron/core/runtime/profile';
 
 test('profile rename preserves login files, the archive and pending WAL data', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'chancekit-profile-'));

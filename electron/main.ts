@@ -3,25 +3,27 @@ import { mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Command } from '../src/shared';
-import { commandSchema } from './core/validation';
-import { RELEASE } from './core/component';
+import { commandSchema } from './core/connection/validation';
+import { RELEASE } from './core/runtime/component';
 import { BRAND } from '../src/brand';
-import { resolveProfileDirectory } from './core/profile';
-import { ModelSettingsStore, modelConfigInputSchema } from './core/model-settings';
-import { getModelCatalog, testPiModel } from './core/pi-model';
-import { ScheduleStore } from './core/schedule-store';
-import { ScheduleProcessor } from './core/schedule-processor';
-import { extractActivities } from './core/activity-agent';
-import { informationQuerySchema, processingConfigSchema, scheduleQuerySchema } from './core/activity-schema';
+import { resolveProfileDirectory } from './core/runtime/profile';
+import { ModelSettingsStore, modelConfigInputSchema } from './core/models/model-settings';
+import { getModelCatalog, testPiModel } from './core/models/pi-model';
+import { ScheduleStore } from './core/processing/schedule-store';
+import { DailyScheduleProcessor, DailyScheduleStore, extractDailyActivities } from './core/processing/daily-extraction/index';
+import { informationQuerySchema, processingConfigSchema, processingDetailsQuerySchema, scheduleQuerySchema } from './core/processing/activity-schema';
 import { emptyInformationPage } from '../src/schedule';
 import { z } from 'zod';
 import type { AppState } from '../src/shared';
-import type { AttachmentRequest, ResolvedAttachment } from './core/material-document';
-import type { ReplyRequest } from './core/message-references';
-import { InformationTitleReader } from './core/information-titles';
-import { WebpagePdfStore } from './core/webpage-pdf';
-import { downloadPublicMaterial } from './core/message-materials';
+import type { AttachmentRequest, ResolvedAttachment } from './core/materials/material-document';
+import type { ReplyRequest } from './core/archive/message-references';
+import { InformationTitleReader } from './core/processing/information-titles';
+import { WebpagePdfStore } from './core/materials/webpage-pdf';
+import { downloadPublicMaterial } from './core/materials/message-materials';
 import { printWebpagePdf } from './webpage-pdf-printer';
+import { registerOnboardingIpc } from './onboarding/ipc';
+import { OnboardingStore } from './onboarding/store';
+import { applicationMenuTemplate } from './application-menu';
 
 app.setName(BRAND.name);
 const profile = process.env.CHANCEKIT_TEST_DATA ? path.resolve(process.env.CHANCEKIT_TEST_DATA)
@@ -34,7 +36,8 @@ let shutdownComplete = false;
 let workerExited = false;
 let worker: Electron.UtilityProcess;
 let modelTest: AbortController | undefined;
-let processor: ScheduleProcessor | undefined;
+let processor: DailyScheduleProcessor | undefined;
+let scheduleStore: ScheduleStore | undefined;
 let titleReader: InformationTitleReader | undefined;
 let archiveAccountId = '';
 let followedSignature = '';
@@ -88,6 +91,13 @@ app.whenReady().then(async () => {
   function verifySender(event: Electron.IpcMainInvokeEvent) {
     if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Untrusted IPC sender');
   }
+  registerOnboardingIpc({
+    ipcMain,
+    store: new OnboardingStore(root, Boolean(process.env.CHANCEKIT_TEST_DATA)),
+    platform: process.platform,
+    verifySender,
+    openExternal: url => shell.openExternal(url),
+  });
   const modelSettings = new ModelSettingsStore(root, {
     isEncryptionAvailable: () => safeStorage.isEncryptionAvailable()
       && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
@@ -123,30 +133,29 @@ app.whenReady().then(async () => {
   await ready;
   const initial = await request<AppState>({ type: 'state' });
   archiveAccountId = initial.localAccount?.id ?? '';
-  const scheduleStore = new ScheduleStore(path.join(root, 'messages.sqlite'));
+  scheduleStore = new ScheduleStore(path.join(root, 'messages.sqlite'));
+  const dailyScheduleStore = new DailyScheduleStore(path.join(root, 'messages.sqlite'));
   const webpagePdfs = new WebpagePdfStore(path.join(root, 'webpage-pdfs'), printWebpagePdf);
   titleReader = new InformationTitleReader(scheduleStore.information, () => archiveAccountId,
     () => { if (!window?.isDestroyed()) window?.webContents.send('chancekit:event', { type: 'schedule' }); });
-  processor = new ScheduleProcessor(scheduleStore, () => modelSettings.saved(),
+  processor = new DailyScheduleProcessor(dailyScheduleStore, () => modelSettings.saved(),
     async (job, settings, signal) => {
       const attempted = new Set<string>();
-      for (let count = 0; count < 4; count++) {
+      for (let count = 0; count < 8; count++) {
         signal.throwIfAborted();
-        const missing = job.referenceGraph?.missing.find(item => !attempted.has(`${item.fromKey}:${item.id}`));
+        const missing = job.messages.flatMap(source => source.referenceGraph?.missing ?? [])
+          .find(item => !attempted.has(`${item.fromKey}:${item.id}`));
         if (!missing) break;
         attempted.add(`${missing.fromKey}:${missing.id}`);
-        try { await request({ type: 'resolveReply', accountId: job.message.accountId, messageKey: missing.fromKey, replyId: missing.id }, signal); }
+        try { await request({ type: 'resolveReply', accountId: job.accountId, messageKey: missing.fromKey, replyId: missing.id }, signal); }
         catch { signal.throwIfAborted(); }
-        if (!scheduleStore.refreshReferences(job)) throw new Error('原消息已更新，引用读取结果未采用。');
+        if (!dailyScheduleStore.refreshReferences(job)) throw new Error('当日消息已更新，引用读取结果未采用。');
       }
-      return extractActivities(job, settings, {
+      return extractDailyActivities(job, settings, {
         signal, fetch: (input, init) => net.fetch(input instanceof URL ? input.href : input, init),
-        readWebpagePdf: (input, signal, consumePages) => webpagePdfs.read(job.message.accountId, input, signal, consumePages),
-        resolveAttachment: (segmentIndex, signal) => request<ResolvedAttachment>({
-          type: 'resolveAttachment', accountId: job.message.accountId, messageKey: job.message.key, segmentIndex,
-        }, signal),
-        resolveReferencedAttachment: (messageKey, segmentIndex, signal) => request<ResolvedAttachment>({
-          type: 'resolveAttachment', accountId: job.message.accountId, messageKey, segmentIndex,
+        readWebpagePdf: (_messageKey, input, signal, consumePages) => webpagePdfs.read(job.accountId, input, signal, consumePages),
+        resolveAttachment: (messageKey, segmentIndex, signal) => request<ResolvedAttachment>({
+          type: 'resolveAttachment', accountId: job.accountId, messageKey, segmentIndex,
         }, signal),
       });
     },
@@ -155,25 +164,28 @@ app.whenReady().then(async () => {
   ipcMain.handle('chancekit:schedule:list', (event, input) => {
     verifySender(event);
     const query = scheduleQuerySchema.parse(input);
-    return archiveAccountId ? scheduleStore.page(archiveAccountId, query) : { activities: [], undated: [] };
+    return archiveAccountId ? scheduleStore!.page(archiveAccountId, query) : { activities: [], undated: [] };
   });
   ipcMain.handle('chancekit:schedule:detail', (event, input) => {
     verifySender(event);
     const id = z.string().regex(/^[a-f0-9]{64}$/).parse(input);
-    return archiveAccountId ? scheduleStore.detail(archiveAccountId, id) : null;
+    return archiveAccountId ? scheduleStore!.detail(archiveAccountId, id) : null;
   });
   ipcMain.handle('chancekit:schedule:status', event => { verifySender(event); return processor!.status(); });
+  ipcMain.handle('chancekit:schedule:processing-details', (event, input) => {
+    verifySender(event); return processor!.details(processingDetailsQuerySchema.parse(input));
+  });
   ipcMain.handle('chancekit:information:list', (event, input) => {
     verifySender(event);
     const query = informationQuerySchema.parse(input);
-    const page = archiveAccountId ? scheduleStore.information.page(archiveAccountId, query) : emptyInformationPage;
+    const page = archiveAccountId ? scheduleStore!.information.page(archiveAccountId, query) : emptyInformationPage;
     if (archiveAccountId) titleReader?.request(archiveAccountId, page.items.map(item => item.messageKey));
     return page;
   });
   ipcMain.handle('chancekit:information:detail', (event, input) => {
     verifySender(event);
     const key = z.string().regex(/^[a-f0-9]{64}$/).parse(input);
-    return archiveAccountId ? scheduleStore.information.detail(archiveAccountId, key) : null;
+    return archiveAccountId ? scheduleStore!.information.detail(archiveAccountId, key) : null;
   });
   ipcMain.handle('chancekit:pdf:open', async (event, input) => {
     verifySender(event);
@@ -181,11 +193,11 @@ app.whenReady().then(async () => {
       messageKey: z.string().regex(/^[a-f0-9]{64}$/), snapshotId: z.string().regex(/^[a-f0-9]{64}$/),
     }).strict().parse(input);
     const accountId = archiveAccountId;
-    if (!scheduleStore.hasSnapshot(accountId, messageKey, snapshotId)) throw new Error('PDF 不属于当前关注消息。');
+    if (!scheduleStore!.hasSnapshot(accountId, messageKey, snapshotId)) throw new Error('PDF 不属于当前关注消息。');
     let file: string;
     try { file = await webpagePdfs.file(accountId, snapshotId); }
     catch { throw new Error('PDF 快照已清理，请重新读取原消息。'); }
-    if (accountId !== archiveAccountId || !scheduleStore.hasSnapshot(accountId, messageKey, snapshotId)) throw new Error('PDF 来源或账号已变化。');
+    if (accountId !== archiveAccountId || !scheduleStore!.hasSnapshot(accountId, messageKey, snapshotId)) throw new Error('PDF 来源或账号已变化。');
     const error = await shell.openPath(file);
     if (error) throw new Error('PDF 打开失败，请检查系统 PDF 阅读器。');
   });
@@ -233,11 +245,7 @@ app.whenReady().then(async () => {
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('不支持这个链接。');
     await shell.openExternal(url.href);
   });
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    ...(process.platform === 'darwin' ? [{ label: BRAND.name, submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] } as Electron.MenuItemConstructorOptions] : []),
-    { label: '编辑', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
-    { label: '窗口', submenu: [{ role: 'minimize' }, { role: 'close' }] },
-  ]));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(BRAND.name)));
   window = new BrowserWindow({ width: 1240, height: 820, minWidth: 900, minHeight: 640, backgroundColor: '#ffffff', title: BRAND.name, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
@@ -263,7 +271,7 @@ app.on('before-quit', event => {
   const timer = setTimeout(() => { worker.kill(); finish(); }, 10_000);
   worker.once('exit', finish);
   void (async () => {
-    try { await processor?.close(); }
+    try { await processor?.close(); scheduleStore?.close(); }
     finally {
       if (!shutdownComplete && !workerExited) worker.postMessage({ type: 'shutdown' });
     }

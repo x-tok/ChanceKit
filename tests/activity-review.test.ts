@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeMessage } from '../electron/core/store';
-import { canTryMessageFirst, isPlainJobAdvertisement, reviewActivities, supportedActivity } from '../electron/core/activity-review';
+import { normalizeMessage } from '../electron/core/archive/store';
+import { canTryMessageFirst, isPlainJobAdvertisement, reviewActivities, supportedActivity } from '../electron/core/processing/activity-review';
 import type { ActivityInput } from '../src/schedule';
 import { sample } from './fixtures';
 

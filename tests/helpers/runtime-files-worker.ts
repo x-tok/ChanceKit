@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { runtimeFiles, replaceRuntimeDirectory } from '../../electron/core/runtime-files';
+import { runtimeFiles, replaceRuntimeDirectory } from '../../electron/core/runtime/runtime-files';
 
 async function run() {
   await runtimeFiles.rm(path.join(process.argv[2]!, 'QQRuntime.staging.app'), { recursive: true, force: true });

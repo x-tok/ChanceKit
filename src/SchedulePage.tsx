@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, ArrowRight, Bot, CalendarDays, CalendarRange, Check, ChevronRight, Clock3, ExternalLink, LoaderCircle, MapPin, MessageCircle, RefreshCw, Search, Settings2, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, CalendarDays, CalendarRange, ChevronRight, Clock3, CloudDownload, ExternalLink, LoaderCircle, MapPin, MessageCircle, RefreshCw, Search, X } from 'lucide-react';
 import { bridge, isDesktop } from './bridge';
 import { activityOnDate, activityTimeLabel, activityTypes, addDays, calendarWindowStart, chinaToday, emptyProcessingStatus, isOngoingActivity, scheduleProcessingVersion, type Activity, type ActivityDetail, type ActivityType, type ProcessingStatus, type SchedulePage } from './schedule';
 import type { AppState } from './shared';
 import s from './Schedule.module.css';
 import common from './App.module.css';
-import { RecruitingInformationPanel } from './RecruitingInformation';
 import { SourceMaterials } from './SourceMaterials';
 import { CalendarMessage } from './CalendarMessage';
+import { initialSyncWindow, runInitialSync, type InitialSyncProgress } from './onboarding/initial-sync';
+import { SyncDialog } from './schedule-sync/SyncDialog';
 
 const weekday = (day: string) => ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date(`${day}T00:00:00Z`).getUTCDay()];
 const errorText = (error: unknown) => (error instanceof Error ? error.message : '操作失败，请重试。').replace(/^Error invoking remote method '[^']+': Error: /, '');
@@ -26,15 +27,17 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [syncError, setSyncError] = useState('');
+  const [syncOpen, setSyncOpen] = useState(false);
   const [revision, setRevision] = useState(0);
-  const [showIncomplete, setShowIncomplete] = useState(0);
+  const [syncProgress, setSyncProgress] = useState<InitialSyncProgress>();
   const [selected, setSelected] = useState<ActivityDetail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailId, setDetailId] = useState('');
-  const consent = useRef<HTMLDialogElement>(null);
   const detail = useRef<HTMLDialogElement>(null);
   const requestNumber = useRef(0);
   const detailNumber = useRef(0);
+  const syncController = useRef<AbortController | undefined>(undefined);
   const today = chinaToday();
   const days = Array.from({ length: 7 }, (_, index) => addDays(week, index));
   const scheduled = page.activities.filter(activity => !isOngoingActivity(activity));
@@ -44,6 +47,11 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
     a.endDate!.localeCompare(b.endDate!) || a.startDate!.localeCompare(b.startDate!) || a.title.localeCompare(b.title, 'zh-CN'));
   const groups = state.groups.filter(group => group.followed);
   const accountId = state.localAccount?.id;
+  const readingMessages = Boolean(syncProgress);
+  const organizing = status.enabled || status.running > 0;
+  const queueTotal = status.pending + status.running + status.completed + status.partial + status.failed;
+  const syncSettled = !readingMessages && !organizing && queueTotal > 0 && status.pending === 0;
+  const syncSince = status.since || initialSyncWindow().since;
   const refresh = useCallback(() => setRevision(value => value + 1), []);
   const jumpTo = (day: string) => { setAnchor(day); setSelectedDate(day); };
   const shiftWindow = (offset: number) => {
@@ -56,6 +64,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   }), [refresh]);
   useEffect(() => {
     setGroupId(''); setPage(emptyPage); setSelected(null); setDetailId(''); detail.current?.close(); detailNumber.current++;
+    syncController.current?.abort(); setSyncProgress(undefined); setSyncOpen(false); setSyncError('');
   }, [accountId]);
   useEffect(() => {
     if (groupId && !groups.some(group => group.id === groupId)) setGroupId('');
@@ -76,15 +85,49 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
     }, search ? 200 : 50);
     return () => { clearTimeout(timer); requestNumber.current++; };
   }, [week, type, groupId, search, accountId, revision, state.groups]);
-  useEffect(() => () => { detailNumber.current++; }, []);
+  useEffect(() => () => { detailNumber.current++; syncController.current?.abort(); }, []);
   const action = async (operation: () => Promise<unknown>) => {
     setBusy(true); setError('');
     try { await operation(); refresh(); } catch (error) { setError(errorText(error)); }
     finally { setBusy(false); }
   };
-  const configure = (enabled: boolean, concurrency = status.concurrency) => action(async () => {
-    setStatus(await bridge.configureProcessing({ enabled, concurrency }));
-  });
+  const startSync = async () => {
+    if (!state.account || state.phase !== 'online') { setSyncError('请先在设置中登录 QQ，再开始同步。'); return; }
+    const controller = new AbortController();
+    syncController.current?.abort(); syncController.current = controller;
+    setBusy(true); setSyncError('');
+    setSyncProgress({ completed: 0, total: groups.length, group: '', added: 0 });
+    try {
+      const window = initialSyncWindow();
+      await runInitialSync(state, window.since, bridge, setSyncProgress, controller.signal);
+      controller.signal.throwIfAborted();
+      setSyncProgress(undefined);
+      setStatus(await bridge.configureProcessing({ enabled: true, concurrency: 3, stopWhenIdle: true, since: window.since }));
+      refresh();
+    } catch (error) {
+      if (!controller.signal.aborted) setSyncError(errorText(error));
+    } finally {
+      if (syncController.current === controller) { syncController.current = undefined; setBusy(false); }
+    }
+  };
+  const stopSync = async () => {
+    setBusy(true); setSyncError('');
+    try {
+      syncController.current?.abort(); syncController.current = undefined; setSyncProgress(undefined);
+      setStatus(await bridge.configureProcessing({ enabled: false, concurrency: 3, stopWhenIdle: false }));
+      refresh();
+    } catch (error) { setSyncError(errorText(error)); }
+    finally { setBusy(false); }
+  };
+  const retrySync = async () => {
+    setBusy(true); setSyncError('');
+    try {
+      await bridge.retryProcessing();
+      setStatus(await bridge.configureProcessing({ enabled: true, concurrency: 3, stopWhenIdle: true, since: syncSince }));
+      refresh();
+    } catch (error) { setSyncError(errorText(error)); }
+    finally { setBusy(false); }
+  };
   const openDetail = async (activity: Activity | string) => {
     const ticket = ++detailNumber.current;
     const id = typeof activity === 'string' ? activity : activity.id;
@@ -106,31 +149,12 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
 
   return <section className={s.page} aria-label="日程">
     <div className={s.scroll}>
-      <header className={s.heading}><div><span>活动与机会</span><h1>日程</h1></div><span className={s.agent}><Bot size={16} />pi agent</span></header>
-      <section className={s.processing} aria-label="消息处理">
-        <div className={s.processingMain}>
-          <div className={s.processingState}><span className={`${common.statusDot} ${status.enabled && !status.blockedReason ? common.liveDot : ''}`} /><strong>{status.blockedReason && status.enabled ? '等待模型配置' : status.enabled ? status.running ? '正在提取活动' : '自动处理已开启' : '自动处理已暂停'}</strong></div>
-          <label className={s.switchLabel}>自动处理<input aria-label="自动处理" type="checkbox" role="switch" checked={status.enabled} disabled={!isDesktop || busy || !accountId || (!groups.length && !status.enabled)}
-            onChange={event => { if (event.target.checked) consent.current?.showModal(); else void configure(false); }} /></label>
-        </div>
-        <div className={s.processingStats} role="status">
-          <span>等待 <b>{status.pending}</b></span><span>处理中 <b>{status.running}</b></span><span>已完成 <b>{status.completed}</b></span>
-          <button className={s.incompleteLink} onClick={() => setShowIncomplete(value => value + 1)}>待补全 <b>{status.incompleteInformation ?? status.partial + status.failed}</b><ChevronRight size={12} /></button>
-          <span className={s.groupCount}>{groups.length} 个关注群</span>
-        </div>
-        <details className={s.queueDetails}>
-          <summary><Settings2 size={14} />处理设置与记录</summary>
-          <div className={s.queueControls}><label>并发消息数<select aria-label="并发消息数" value={status.concurrency} disabled={!isDesktop || busy || !accountId} onChange={event => void configure(status.enabled, Number(event.target.value))}>{[1, 2, 3, 4, 5, 6].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-            <button className={common.textButton} disabled={!isDesktop || busy || !status.partial && !status.failed} onClick={() => void action(async () => setStatus(await bridge.retryProcessing()))}><RefreshCw size={14} />重试未完成</button>
-            <button className={common.textButton} onClick={onModels}><Bot size={14} />模型配置</button>
-          </div>
-          {status.partial + status.failed > 0 ? <p className={s.muted}>未读全的消息已保留在下方“招聘资讯 → 待补全”，可查看来源并逐条重新读取。</p>
-            : <p className={s.muted}>暂无异常记录</p>}
-        </details>
-      </section>
-      {!isDesktop && <p className={s.banner}><AlertCircle size={16} />浏览器预览：没有本地群消息，处理与保存不可用。</p>}
-      {isDesktop && !loading && (status.processorVersion ?? 0) < scheduleProcessingVersion && <p className={s.banner}><RefreshCw size={16} />处理引擎已更新，请重启应用。旧记录会先在本机重新判断；自动处理开启时，仍未解决的记录会自动补处理一次。</p>}
-      {status.blockedReason && isDesktop && <p className={s.banner}><AlertCircle size={16} />{status.blockedReason}<button className={common.textButton} onClick={onModels}>模型配置</button></p>}
+      <header className={s.heading}><div><span>活动与机会</span><h1>日程</h1></div>
+        <button className={common.primaryButton} disabled={!isDesktop || !accountId || !groups.length} onClick={() => setSyncOpen(true)}>
+          {readingMessages || organizing ? <LoaderCircle size={15} className={common.spin} /> : <CloudDownload size={15} />}
+          {readingMessages || organizing ? '查看同步进度' : syncSettled ? '再次同步' : '开始同步'}
+        </button>
+      </header>
       <div className={s.calendarToolbar}>
         <div className={s.weekNavigation}>
           <h2>{week.slice(0, 4)}年 {shortDate(week)} 至 {days[6].slice(0, 4) !== week.slice(0, 4) ? `${days[6].slice(0, 4)}年 ` : ''}{shortDate(days[6])}</h2>
@@ -148,9 +172,9 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
             aria-label={`${day} ${weekday(day)}${day === today ? ' 今天' : ''}`} aria-pressed={day === selectedDate}
             aria-current={day === today ? 'date' : undefined} aria-controls="daily-activities"
             onClick={() => setSelectedDate(day)}>
-            <span>{weekday(day)}</span><strong>{Number(day.slice(8))}</strong>
-            <small>{day === today ? '今天' : `${Number(day.slice(5, 7))}月`}</small>
-            <span className={s.dateCount}>{loading ? '·' : count ? `${count}场` : '无安排'}</span>
+            <span className={s.dateName}>{weekday(day)}{day === today && <small>今天</small>}</span>
+            <strong>{Number(day.slice(8))}<small>/{Number(day.slice(5, 7))}</small></strong>
+            <span className={s.dateCount}>{loading ? '·' : count ? `${count} 场` : '无安排'}</span>
           </button>;
         })}
       </div>
@@ -200,16 +224,14 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
         </button>)}</div>
       </section>}
       {page.undated.length > 0 && <section className={s.undated} aria-label="日期待确认"><header><h2>日期待确认</h2><span>{page.undated.length} 项</span></header><div>{page.undated.map(activityButton)}</div></section>}
-      <RecruitingInformationPanel key={accountId || 'preview'} state={state} revision={revision} showIncomplete={showIncomplete}
-        processingEnabled={status.enabled} onChange={refresh} onGroup={onGroup} onActivity={id => void openDetail(id)} />
     </div>
-    <dialog ref={consent} className={s.dialog}>
-      <h2>开启自动处理？</h2>
-      <p>已关注群聊的已归档消息及后续新消息、消息中的公开链接正文、图片及支持的群文件内容，将发送给“模型配置”中保存的服务商，用于提取活动信息，可能产生 API 费用。多图或长海报会分批识别，可能增加调用次数和费用。</p>
-      <p>处理结果保存在本机。暂停会取消正在处理的请求；已发出的请求仍可能计费。</p>
-      <div className={s.dialogActions}><button className={common.secondaryButton} onClick={() => consent.current?.close()}>取消</button><button className={common.primaryButton} onClick={() => { consent.current?.close(); void configure(true); }}><Check size={16} />开启处理</button></div>
-    </dialog>
-    <dialog ref={detail} className={`${s.dialog} ${s.detail}`} onClose={() => { detailNumber.current++; setDetailId(''); }}>
+    <SyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} status={status} progress={syncProgress}
+      since={syncSince} groups={groups.length} busy={busy} error={syncError} revision={revision}
+      canStart={isDesktop && Boolean(accountId) && groups.length > 0 && state.phase === 'online'}
+      onStart={() => void startSync()} onStop={() => void stopSync()} onRetry={() => void retrySync()}
+      onModels={() => { setSyncOpen(false); onModels(); }} outdated={isDesktop && !loading && (status.processorVersion ?? 0) < scheduleProcessingVersion} />
+    <dialog ref={detail} className={`${s.dialog} ${s.detail}`} onClick={event => { if (event.target === detail.current) detail.current?.close(); }}
+      onClose={() => { detailNumber.current++; setDetailId(''); }}>
       <div className={s.detailHeading}><span className={s.muted}>活动详情</span><button className={common.iconButton} title="关闭活动详情" aria-label="关闭活动详情" onClick={() => detail.current?.close()}><X size={19} /></button></div>
       {detailBusy ? <p className={s.empty}><LoaderCircle size={22} className={common.spin} />正在读取</p> : selected ? <>
         <span className={s.kind} data-kind={selected.activity.type}>{selected.activity.type}</span><h2>{selected.activity.title}</h2>
@@ -227,7 +249,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
         </dl>
         {selected.activity.description && <p className={s.description}>{selected.activity.description}</p>}
         {selected.activity.registrationUrl && <button className={common.secondaryButton} onClick={() => openLink(selected.activity.registrationUrl!)}><ExternalLink size={15} />报名入口</button>}
-        <section className={s.sources}><h3>消息来源 · {selected.sources.length}</h3>{selected.sources.map(source => <details key={source.messageKey} open={selected.sources.length === 1}>
+        <section className={s.sources}><h3>完整原始信息 · {selected.sources.length} 条</h3>{selected.sources.map(source => <details key={source.messageKey} open={selected.sources.length === 1}>
           <summary><MessageCircle size={14} />{source.groupName}</summary>
           <span className={s.sourceMeta}>{source.senderName} · {new Date(source.messageTime * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}</span>
           <blockquote>{source.evidence}</blockquote><pre>{source.text}</pre>
@@ -238,7 +260,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
           </details>)}
           {(source.reviewReasons ?? source.warnings).map(reason => <p className={s.sourceWarning} key={reason}><AlertCircle size={13} />{reason}</p>)}
           {source.reviewReasons !== undefined && source.warnings.length > 0 && <details className={s.readingNotes}>
-            <summary>材料读取记录 · {source.warnings.length}</summary>
+            <summary>来源阅读说明 · {source.warnings.length}</summary>
             <ul>{source.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
           </details>}
           <SourceMaterials materials={source.materials} onOpen={openLink}

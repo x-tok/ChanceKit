@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, stat, writeFile, copyFile, open, rename, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { installBundledNapCat, RELEASE } from '../electron/core/component';
+import { installBundledNapCat, RELEASE } from '../electron/core/runtime/component';
 
 const archive = path.resolve('resources/napcat', RELEASE.archive);
 

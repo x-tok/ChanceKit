@@ -1,8 +1,8 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { AppService } from './core/service';
-import { Store } from './core/store';
-import { errorText } from './core/validation';
+import { AppService } from './core/application/service';
+import { Store } from './core/archive/store';
+import { errorText } from './core/connection/validation';
 
 const root = process.argv[2];
 const componentArchive = process.argv[3];

@@ -1,9 +1,9 @@
 import { writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { RuntimeManager } from '../../electron/core/runtime';
-import { macLoader, macLaunchArgs } from '../../electron/core/mac-loader';
-import { Store } from '../../electron/core/store';
+import { RuntimeManager } from '../../electron/core/runtime/runtime';
+import { macLoader, macLaunchArgs } from '../../electron/core/runtime/mac-loader';
+import { Store } from '../../electron/core/archive/store';
 
 const root = process.argv[2];
 // Match the real worker's archive initialization before the main process opens schedules.

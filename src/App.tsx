@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, Bot, CalendarDays, Check, CheckCheck, ChevronDown, ChevronUp, CircleHelp, Download, ExternalLink, FileText, FolderOpen, Hash, ImageOff, Link2, LoaderCircle, MessageCircle, Monitor, Plug, QrCode, RefreshCw, Search, ShieldCheck, Square, Star, Unplug, Users, Wifi, X } from 'lucide-react';
-import QRCode from 'qrcode';
-import type { Account, AppState, ConnectionConfig, Group, HistoryResult, Message, MessagePage, QQInstallation, Segment } from './shared';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ArrowDown, ArrowLeft, ArrowRight, CalendarDays, ChevronDown, ChevronUp, Download, ExternalLink, FileText, Hash, ImageOff, Link2, LoaderCircle, MessageCircle, Plug, RefreshCw, Search, Settings2, ShieldCheck, Star, Unplug, Users, Wifi, X } from 'lucide-react';
+import type { Account, AppState, Group, HistoryResult, Message, MessagePage, Segment } from './shared';
 import { bridge, isDesktop } from './bridge';
 import { BRAND } from './brand';
-import { ModelConfiguration } from './ModelConfiguration';
+import { Onboarding } from './onboarding/Onboarding';
+import { SettingsPage } from './settings/SettingsPage';
 import { Schedule } from './SchedulePage';
 import s from './App.module.css';
 
@@ -29,8 +29,9 @@ function Avatar({ name, id, size = 'normal' }: { name: string; id?: string; size
 
 export function App() {
   const [state, setState] = useState<AppState>(initialState);
-  const [view, setView] = useState<'connect' | 'messages' | 'models' | 'schedule'>('connect');
-  const [modelsOpened, setModelsOpened] = useState(false);
+  const [view, setView] = useState<'messages' | 'schedule' | 'settings'>('schedule');
+  const [settingsOpened, setSettingsOpened] = useState(false);
+  const [onboarding, setOnboarding] = useState<'loading' | 'required' | 'complete'>('loading');
   const [selected, setSelected] = useState('');
   const [toast, setToast] = useState('');
   const [messageRevision, setMessageRevision] = useState(0);
@@ -47,11 +48,18 @@ export function App() {
     });
   }, [notify]);
   useEffect(() => {
+    const request = bridge.onboardingStatus?.() ?? Promise.resolve({ completed: true });
+    void request.then(result => setOnboarding(result.completed ? 'complete' : 'required'))
+      .catch(error => { notify(messageError(error)); setOnboarding('required'); });
+  }, [notify]);
+  useEffect(() => {
     const id = state.localAccount?.id || '';
     if (previousAccount.current !== id) { previousAccount.current = id; setSelected(''); }
   }, [state.localAccount?.id]);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 8000); return () => clearTimeout(timer); }, [toast]);
   const selectedGroup = state.groups.find(group => group.id === selected);
+  if (onboarding === 'loading') return <div className={s.appLoading}><LoaderCircle className={s.spin} size={24} /><span>正在准备{BRAND.name}</span></div>;
+  if (onboarding === 'required') return <Onboarding state={state} onComplete={() => { setOnboarding('complete'); setView('schedule'); }} />;
   return <div className={s.app}>
     <a className={s.skipLink} href="#main-content">跳到主要内容</a>
     <aside className={s.navigation}>
@@ -62,8 +70,7 @@ export function App() {
       <nav aria-label="主导航">
         <button className={view === 'schedule' ? s.navActive : ''} aria-current={view === 'schedule' ? 'page' : undefined} onClick={() => setView('schedule')}><CalendarDays size={18} /><span>日程</span></button>
         <button className={view === 'messages' ? s.navActive : ''} onClick={() => setView('messages')}><MessageCircle size={18} /><span>群消息</span>{state.groups.filter(g => g.followed).length > 0 && <small>{state.groups.filter(g => g.followed).length}</small>}</button>
-        <button className={view === 'connect' ? s.navActive : ''} onClick={() => setView('connect')}><Plug size={18} /><span>连接 QQ</span></button>
-        <button className={view === 'models' ? s.navActive : ''} aria-current={view === 'models' ? 'page' : undefined} onClick={() => { setModelsOpened(true); setView('models'); }}><Bot size={18} /><span>模型配置</span></button>
+        <button className={view === 'settings' ? s.navActive : ''} aria-current={view === 'settings' ? 'page' : undefined} onClick={() => { setSettingsOpened(true); setView('settings'); }}><Settings2 size={18} /><span>设置</span></button>
       </nav>
       <div className={s.navBottom}>
         <span className={s.localLabel}><ShieldCheck size={15} /> 本地消息库</span>
@@ -72,94 +79,16 @@ export function App() {
     </aside>
     <main id="main-content" className={s.main}>
       <header className={s.topbar}>
-        <div className={s.breadcrumb}>工作空间 <span>/</span> <strong>{view === 'connect' ? '连接 QQ' : view === 'models' ? '模型配置' : view === 'schedule' ? '日程' : '群消息'}</strong></div>
+        <div className={s.breadcrumb}>工作空间 <span>/</span> <strong>{view === 'settings' ? '设置' : view === 'schedule' ? '日程' : '群消息'}</strong></div>
         <div className={s.topbarRight}>{!isDesktop && <span className={s.previewBadge}>浏览器预览</span>}<span className={`${s.connectionStatus} ${online ? s.connected : ''}`}><span />{phases[state.phase]}</span></div>
       </header>
-      {view === 'connect' ? <Connection state={state} run={run} onMessages={() => setView('messages')} />
-        : view === 'messages' ? <Workspace key={state.localAccount?.id || 'empty'} state={state} group={selectedGroup} select={setSelected} revision={messageRevision} run={run} notify={notify} onConnect={() => setView('connect')} /> : null}
-      {modelsOpened && <ModelConfiguration active={view === 'models'} />}
-      {view === 'schedule' && <Schedule state={state} onModels={() => { setModelsOpened(true); setView('models'); }} onGroup={id => { setSelected(id); setView('messages'); }} />}
+      {view === 'messages' ? <Workspace key={state.localAccount?.id || 'empty'} state={state} group={selectedGroup} select={setSelected} revision={messageRevision} run={run} notify={notify} onConnect={() => { setSettingsOpened(true); setView('settings'); }} /> : null}
+      {settingsOpened && <SettingsPage active={view === 'settings'} state={state} run={run} onMessages={() => setView('messages')} />}
+      {view === 'schedule' && <Schedule state={state} onModels={() => { setSettingsOpened(true); setView('settings'); }} onGroup={id => { setSelected(id); setView('messages'); }} />}
       <footer className={s.statusbar}><span><span className={`${s.statusDot} ${online ? s.liveDot : ''}`} />{state.detail}</span><span>{number.format(state.archived)} 条已归档{state.lastEventAt && ` · 最近消息 ${time(state.lastEventAt)}`}</span></footer>
     </main>
     {toast && <div className={s.toast} role="alert"><span>{toast}</span><IconButton label="关闭提示" onClick={() => setToast('')}><X size={16} /></IconButton></div>}
   </div>;
-}
-
-function Connection({ state, run, onMessages }: { state: AppState; run: (action: () => Promise<unknown>) => Promise<void>; onMessages: () => void }) {
-  const [mode, setMode] = useState<'managed' | 'external'>('managed');
-  const [checking, setChecking] = useState(false);
-  const [detected, setDetected] = useState(false);
-  const [config, setConfig] = useState<ConnectionConfig>({ wsUrl: 'ws://127.0.0.1:3001', accessToken: '', webuiUrl: '', webuiToken: '' });
-  const [loginManagement, setLoginManagement] = useState(false);
-  const [qrImage, setQRImage] = useState('');
-  const busy = ['preparing', 'starting', 'connecting'].includes(state.phase);
-  const active = !['idle', 'error'].includes(state.phase);
-  const online = state.phase === 'online';
-  useEffect(() => { if (state.runtime) setMode(state.runtime); }, [state.runtime]);
-  useEffect(() => { void bridge.savedConnection().then(saved => { setConfig(c => ({ ...c, ...saved })); setLoginManagement(Boolean(saved.webuiUrl)); }); }, []);
-  useEffect(() => {
-    let canceled = false;
-    setQRImage('');
-    if (state.qr) void QRCode.toDataURL(state.qr, { margin: 2, width: 256, errorCorrectionLevel: 'M' }).then(image => { if (!canceled) setQRImage(image); });
-    return () => { canceled = true; };
-  }, [state.qr]);
-  const detect = async () => {
-    setChecking(true);
-    try { await bridge.request({ type: 'detect' }); setDetected(true); } finally { setChecking(false); }
-  };
-  useEffect(() => { if (isDesktop) void run(detect); }, []);
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    void run(() => mode === 'managed' ? bridge.request({ type: 'start', path: state.qq!.path }) : bridge.request({ type: 'connect', config: { ...config, webuiUrl: loginManagement ? config.webuiUrl : '', webuiToken: loginManagement ? config.webuiToken : '' } }));
-  };
-  return <section className={s.connectionPage}>
-    <div className={s.pageHeading}><span className={s.eyebrow}>账号与连接</span><h1>连接你的 QQ</h1></div>
-    <div className={s.connectionLayout}>
-      <form className={s.connectionForm} onSubmit={submit}>
-        <div className={s.segmented} role="group" aria-label="连接方式">
-          <button type="button" className={mode === 'managed' ? s.segmentActive : ''} onClick={() => setMode('managed')} disabled={active}><Monitor size={17} /> 本机 QQ</button>
-          <button type="button" className={mode === 'external' ? s.segmentActive : ''} onClick={() => setMode('external')} disabled={active}><Link2 size={17} /> 已有 NapCat</button>
-        </div>
-        {mode === 'managed' ? <div className={s.localSetup}>
-          <div className={s.sectionHeading}><h2>QQ 客户端</h2><IconButton label="重新检测 QQ" disabled={checking || active} onClick={() => void run(detect)}><RefreshCw size={16} className={checking ? s.spin : ''} /></IconButton></div>
-          <div className={s.installation}>
-            <span className={s.installIcon}><Monitor size={26} strokeWidth={1.5} /></span>
-            <div><strong>{state.qq ? '已找到官方 QQ' : checking ? '正在检测' : '未检测到 QQ'}</strong><p>{state.qq ? state.qq.version : '安装官方 QQ 后可继续连接'}</p></div>
-            {state.qq && <CheckCheck className={s.green} size={20} />}
-          </div>
-          {state.qq && <div className={s.pathLabel}>{state.qq.path}</div>}
-          <div className={s.fileActions}>
-            <button type="button" className={s.secondaryButton} disabled={active} onClick={() => void run(async () => { const path = await bridge.chooseQQ(); if (path) { await bridge.request<QQInstallation>({ type: 'detect', path }); setDetected(true); } })}><FolderOpen size={16} />选择已安装 QQ</button>
-            {!state.qq && <button type="button" className={s.textButton} onClick={() => void run(() => bridge.openExternal('https://im.qq.com/'))}>下载官方 QQ <ExternalLink size={14} /></button>}
-          </div>
-          <dl className={s.environmentFacts}><div><dt>内置组件</dt><dd>NapCat <span>4.18.28</span></dd></div><div><dt>运行方式</dt><dd>独立采集进程</dd></div><div><dt>消息归档</dt><dd>本应用独立保存</dd></div></dl>
-          {detected && !state.qq && <p className={s.inlineNote}>尚未找到 QQ 安装。安装完成后重新检测。</p>}
-        </div> : <div className={s.externalSetup}>
-          <label>消息服务地址<input value={config.wsUrl} onChange={e => setConfig({ ...config, wsUrl: e.target.value })} required placeholder="ws://127.0.0.1:3001" disabled={active} autoComplete="off" /></label>
-          <label>访问令牌<input value={config.accessToken} onChange={e => setConfig({ ...config, accessToken: e.target.value })} type="password" placeholder="OneBot Access Token" disabled={active} autoComplete="off" /></label>
-          <label className={s.checkboxLabel}><input type="checkbox" checked={loginManagement} onChange={e => { setLoginManagement(e.target.checked); if (!config.webuiUrl) setConfig({ ...config, webuiUrl: 'http://127.0.0.1:6099' }); }} disabled={active} />启用扫码登录管理</label>
-          {loginManagement && <div className={s.managementFields}><label>登录管理地址<input value={config.webuiUrl} onChange={e => setConfig({ ...config, webuiUrl: e.target.value })} required placeholder="http://127.0.0.1:6099" disabled={active} /></label><label>登录管理令牌<input value={config.webuiToken} type="password" onChange={e => setConfig({ ...config, webuiToken: e.target.value })} placeholder="NapCat WebUI Token" disabled={active} autoComplete="off" /></label></div>}
-        </div>}
-        {state.error && <div className={s.errorBox} role="alert"><CircleHelp size={18} /><span>{state.error}</span></div>}
-        <div className={s.connectActions}>
-          {active ? <button type="button" className={s.secondaryButton} disabled={state.phase === 'stopping'} onClick={() => void run(() => bridge.request({ type: 'disconnect' }))}><Square size={15} />{state.phase === 'stopping' ? '正在停止' : '停止连接'}</button> : <button type="submit" className={s.primaryButton} disabled={busy || (mode === 'managed' && !state.qq)}><Plug size={17} />{state.phase === 'error' ? '重新连接' : '连接 QQ'}<ArrowRight size={16} /></button>}
-          {online && <button type="button" className={s.primaryButton} onClick={onMessages}>查看群聊 <ArrowRight size={16} /></button>}
-        </div>
-      </form>
-      <div className={s.authorization}>
-        <div className={s.authHeading}><span className={s.stepNumber}>{online ? <Check size={16} /> : '02'}</span><h2>{online ? '账号已连接' : 'QQ 登录确认'}</h2></div>
-        {online && state.account ? <div className={s.accountSuccess}><Avatar key={state.account.id} name={accountName(state.account)} id={state.account.id} size="large" /><h3>{accountName(state.account)}</h3><p>{state.account.id}</p><span className={s.successLabel}><ShieldCheck size={16} /> 登录成功</span><div className={s.accountNumbers}><span><strong>{state.groups.length}</strong>群聊</span><span><strong>{state.groups.filter(g => g.followed).length}</strong>已关注</span></div></div> : <>
-          <div className={`${s.qrFrame} ${qrImage ? s.qrReady : ''}`}>
-            {qrImage ? <img src={qrImage} width={224} height={224} alt="QQ 登录二维码" /> : <div className={s.qrPlaceholder}>{busy ? <LoaderCircle size={36} className={s.spin} /> : <QrCode size={54} strokeWidth={1} />}<span>{busy ? '正在准备登录' : '等待连接'}</span></div>}
-          </div>
-          <h3>{state.phase === 'qr' ? '使用手机 QQ 扫码确认' : busy ? state.detail : '等待生成登录二维码'}</h3>
-          {state.phase === 'qr' && <button type="button" className={s.textButton} onClick={() => void run(() => bridge.request({ type: 'refreshQR' }))}><RefreshCw size={15} />刷新二维码</button>}
-          <span className={s.authFootnote}><ShieldCheck size={14} />无需在{BRAND.name}中输入 QQ 密码</span>
-        </>}
-      </div>
-    </div>
-    {state.logs.length > 0 && <details className={s.logs}><summary>连接活动 <ChevronDown size={14} /></summary><ol>{state.logs.slice(-12).reverse().map((log, index) => <li key={`${log.time}-${index}`}><time>{time(log.time)}</time><span>{log.text}</span></li>)}</ol></details>}
-  </section>;
 }
 
 function Workspace({ state, group, select, revision, run, notify, onConnect }: { state: AppState; group?: Group; select: (id: string) => void; revision: number; run: (action: () => Promise<unknown>) => Promise<void>; notify: (text: string) => void; onConnect: () => void }) {

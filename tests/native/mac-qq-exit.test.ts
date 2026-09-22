@@ -6,8 +6,8 @@ import { once } from 'node:events';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
-import { RuntimeManager, detectQQ } from '../../electron/core/runtime';
-import { macLaunchArgs, macQuitCommand } from '../../electron/core/mac-loader';
+import { RuntimeManager, detectQQ } from '../../electron/core/runtime/runtime';
+import { macLaunchArgs, macQuitCommand } from '../../electron/core/runtime/mac-loader';
 import type { QQInstallation } from '../../src/shared';
 
 const exec = promisify(execFile);

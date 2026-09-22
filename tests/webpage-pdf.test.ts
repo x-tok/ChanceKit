@@ -4,10 +4,10 @@ import { mkdtemp, rm, writeFile, symlink, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import sharp from 'sharp';
-import { shouldUseWebpagePdf, WebpagePdfStore, type WebpagePdfRequest } from '../electron/core/webpage-pdf';
-import { collectMessageMaterials } from '../electron/core/message-materials';
-import { normalizeMessage, Store } from '../electron/core/store';
-import { ScheduleStore } from '../electron/core/schedule-store';
+import { shouldUseWebpagePdf, WebpagePdfStore, type WebpagePdfRequest } from '../electron/core/materials/webpage-pdf';
+import { collectMessageMaterials } from '../electron/core/materials/message-materials';
+import { normalizeMessage, Store } from '../electron/core/archive/store';
+import { ScheduleStore } from '../electron/core/processing/schedule-store';
 import { sample } from './fixtures';
 import { pdfFixture } from './pdf-fixtures';
 

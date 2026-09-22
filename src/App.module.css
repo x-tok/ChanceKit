@@ -29,6 +29,7 @@
 :global(h1), :global(h2), :global(h3), :global(p) { margin: 0; }
 :global(svg) { flex-shrink: 0; }
 :global(::selection) { background: #d9ecdf; }
+.appLoading { min-height: 100dvh; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 12px; }
 .app { height: 100dvh; min-height: 480px; display: grid; grid-template-columns: 188px minmax(0, 1fr); overflow: hidden; }
 .skipLink { position: fixed; top: -80px; left: 20px; padding: 12px; background: white; z-index: 20; }
 .skipLink:focus { top: 12px; }
@@ -64,69 +65,11 @@
 .statusbar { min-height: 31px; flex-shrink: 0; border-top: 1px solid var(--line); padding: 7px 20px; display: flex; align-items: center; justify-content: space-between; gap: 18px; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .statusbar > span { display: flex; align-items: center; gap: 7px; overflow-wrap: anywhere; }
 .statusbar > span:last-child { white-space: nowrap; }
-.connectionPage { padding: 42px 48px 28px; overflow: auto; flex: 1; }
-.pageHeading { margin-bottom: 32px; }
-.eyebrow { color: var(--muted); font-size: 12px; }
-.pageHeading h1 { font-size: 28px; font-weight: 600; line-height: 1.35; margin-top: 9px; }
-.connectionLayout { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(260px, .85fr); gap: 44px; max-width: 950px; }
-.connectionForm { min-width: 0; }
-.segmented { display: flex; padding: 4px; gap: 4px; background: var(--panel); border-radius: 8px; }
-.segmented button { min-height: 40px; flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; border: none; background: none; border-radius: var(--radius); color: var(--muted); font-size: 13px; }
-.segmented .segmentActive { background: white; color: var(--ink); box-shadow: 0 1px 3px #2029251f; }
-.localSetup, .externalSetup { padding-top: 24px; }
-.sectionHeading { display: flex; align-items: center; justify-content: space-between; }
-.sectionHeading h2, .authHeading h2 { font-size: 14px; font-weight: 600; }
 .iconButton { width: 40px; height: 40px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; color: var(--muted); border-radius: var(--radius); padding: 0; }
-.installation { display: flex; align-items: center; gap: 13px; padding: 18px 0 12px; }
-.installIcon { color: var(--muted); background: var(--panel); width: 48px; height: 48px; border-radius: 8px; display: grid; place-items: center; flex-shrink: 0; }
-.installation > div { flex: 1; min-width: 0; }
-.installation strong { font-size: 14px; font-weight: 500; }
-.installation p { color: var(--muted); font-size: 12px; margin-top: 6px; font-variant-numeric: tabular-nums; }
-.green { color: var(--green); }
-.pathLabel { color: var(--muted); font-size: 11px; word-break: break-all; padding: 1px 0 14px; line-height: 1.6; }
-.fileActions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .primaryButton, .secondaryButton, .textButton, .followButton { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; border-radius: var(--radius); padding: 9px 14px; font-size: 13px; font-weight: 500; text-decoration: none; line-height: 1.4; }
 .primaryButton { background: var(--green); color: #fff; border: 1px solid var(--green); }
 .secondaryButton { border: 1px solid var(--line); color: var(--ink); background: white; }
 .textButton { border: 0; background: none; color: var(--green); padding: 8px 4px; font-size: 12px; }
-.environmentFacts { margin: 25px 0 0; border-top: 1px solid var(--line); padding-top: 9px; }
-.environmentFacts > div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; font-size: 12px; }
-.environmentFacts dt { color: var(--muted); }
-.environmentFacts dd { margin: 0; text-align: right; }
-.environmentFacts dd span { color: var(--muted); padding-left: 7px; font-size: 11px; }
-.inlineNote { font-size: 12px; color: #946014; margin-top: 14px; line-height: 1.7; }
-.connectActions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
-.externalSetup label { display: flex; flex-direction: column; gap: 9px; font-size: 12px; font-weight: 500; margin-bottom: 20px; }
-.externalSetup input:not([type="checkbox"]) { width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid #cbd3ce; border-radius: var(--radius); background: #fff; font-size: 13px; }
-.externalSetup .checkboxLabel { flex-direction: row; gap: 9px; align-items: center; margin: 24px 0 20px; min-height: 24px; }
-.checkboxLabel input { accent-color: var(--green); width: 16px; height: 16px; margin: 0; }
-.managementFields { border-top: 1px solid var(--line); padding-top: 20px; }
-.authorization { border-left: 1px solid var(--line); padding-left: 36px; text-align: center; min-width: 0; }
-.authHeading { display: flex; align-items: center; justify-content: flex-start; gap: 9px; margin: 9px 0 32px; }
-.stepNumber { height: 23px; width: 23px; border: 1px solid var(--line); display: grid; place-items: center; font-size: 10px; color: var(--muted); border-radius: 50%; font-variant-numeric: tabular-nums; }
-.qrFrame { width: 228px; aspect-ratio: 1; max-width: 100%; border: 1px solid var(--line); background: #fafcfb; border-radius: 8px; margin: 0 auto 24px; display: grid; place-items: center; overflow: hidden; }
-.qrFrame img { display: block; width: 100%; height: auto; aspect-ratio: 1; }
-.qrReady { background: white; border-color: #c7d9ce; }
-.qrPlaceholder { display: flex; flex-direction: column; align-items: center; gap: 18px; color: #8c9c92; }
-.qrPlaceholder span { color: var(--muted); font-size: 12px; }
-.authorization h3 { font-size: 13px; font-weight: 500; line-height: 1.7; overflow-wrap: anywhere; }
-.authorization > .textButton { margin-top: 9px; }
-.authFootnote { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--muted); margin-top: 26px; line-height: 1.6; }
-.accountSuccess { padding-top: 8px; }
-.accountSuccess h3 { font-size: 19px; font-weight: 600; margin-top: 17px; }
-.accountSuccess p { font-size: 12px; color: var(--muted); margin-top: 5px; }
-.successLabel { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: 12px; margin-top: 20px; }
-.accountNumbers { display: flex; justify-content: center; gap: 48px; margin-top: 30px; }
-.accountNumbers span { display: flex; flex-direction: column; gap: 7px; color: var(--muted); font-size: 12px; }
-.accountNumbers strong { font-size: 24px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
-.errorBox { display: flex; align-items: flex-start; gap: 9px; margin-top: 20px; padding: 12px; background: #fbefed; color: var(--danger); border-radius: var(--radius); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.errorBox svg { margin-top: 2px; }
-.logs { margin-top: 36px; border-top: 1px solid var(--line); max-width: 950px; color: var(--muted); font-size: 12px; }
-.logs summary { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; cursor: pointer; list-style: none; }
-.logs summary::-webkit-details-marker { display: none; }
-.logs ol { list-style: none; padding: 0; margin: 0; }
-.logs li { display: flex; gap: 18px; padding: 8px 0; line-height: 1.6; }
-.logs time { color: #7b8780; font-variant-numeric: tabular-nums; }
 .workspace { flex: 1; display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; }
 .groupPanel { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .groupPanelHeading { display: flex; align-items: center; justify-content: space-between; padding: 17px 16px 8px 22px; }
@@ -217,9 +160,6 @@
   .app { grid-template-columns: 158px minmax(0, 1fr); }
   .navigation { padding-left: 10px; padding-right: 10px; }
   .workspace { grid-template-columns: 248px minmax(0, 1fr); }
-  .connectionPage { padding: 32px 28px; }
-  .connectionLayout { gap: 26px; grid-template-columns: minmax(260px, 1fr) minmax(225px, .8fr); }
-  .authorization { padding-left: 24px; }
   .readerHeading { padding: 16px 18px; gap: 8px; }
   .readerToolbar { padding: 7px 18px; }
   .messages { padding-left: 20px; padding-right: 20px; }
@@ -233,17 +173,11 @@
   .brandSubtitle { order: 1; flex-basis: 100%; margin-top: 0; }
   .brand small, .navBottom { display: none; }
   .brandMark { width: 29px; height: 29px; border: none; }
-  .navigation nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; order: 2; gap: 4px; }
+  .navigation nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; order: 2; gap: 4px; }
   .navigation nav button { min-height: 40px; padding: 8px 5px; gap: 5px; font-size: 12px; justify-content: center; }
   .navigation nav small { display: none; }
   .main { flex: 1; }
   .topbar { min-height: 49px; padding: 0 18px; }
-  .connectionPage { padding: 28px 22px; }
-  .connectionLayout { display: flex; flex-direction: column; gap: 28px; }
-  .pageHeading { margin-bottom: 24px; }
-  .pageHeading h1 { font-size: 24px; }
-  .authorization { border-left: none; border-top: 1px solid var(--line); padding: 24px 0 0; }
-  .authHeading { margin-top: 0; }
   .statusbar { min-height: 34px; padding: 8px 14px; font-size: 9px; }
   .statusbar > span:last-child { display: none; }
   .workspace { display: flex; }
@@ -276,7 +210,6 @@
   .brandMark { display: none; }
   .navigation nav button { padding: 8px 3px; font-size: 11px; gap: 3px; }
   .navigation nav button svg { width: 15px; height: 15px; }
-  .connectionPage { padding: 24px 16px; }
   .readerActions > .iconButton { width: 34px; }
   .messageRow > .avatar { width: 28px; height: 28px; }
   .messageMeta { flex-wrap: wrap; }

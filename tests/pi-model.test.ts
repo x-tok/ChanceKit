@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
 import { Agent } from '@earendil-works/pi-agent-core';
-import { createConfiguredPiAgent, getModelCatalog, MODEL_TEST_PROMPT, testPiModel } from '../electron/core/pi-model';
-import type { StoredModelSettings } from '../electron/core/model-settings';
+import { createConfiguredPiAgent, getModelCatalog, MODEL_TEST_PROMPT, testPiModel } from '../electron/core/models/pi-model';
+import type { StoredModelSettings } from '../electron/core/models/model-settings';
 import { configForProvider, defaultModelConfig, modelProviderPresets, type ModelApi } from '../src/model-config';
 
 const stored: StoredModelSettings = {

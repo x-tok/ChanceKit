@@ -10,7 +10,7 @@ import { mockNapCat, sample } from '../fixtures';
 import { pdfFixture } from '../pdf-fixtures';
 import type { Activity, ActivityInput } from '../../src/schedule';
 import type { AppState, DesktopBridge } from '../../src/shared';
-import { emptyProcessingStatus, chinaToday } from '../../src/schedule';
+import { emptyProcessingDetails, emptyProcessingStatus, chinaToday } from '../../src/schedule';
 
 const events: ActivityInput[] = [
   { title: '星河科技校园宣讲会', type: '宣讲会', organizer: '星河科技', startDate: '2026-09-24', endDate: null, startTime: '14:30', endTime: '16:00', location: '大学生活动中心 201', audience: '2027 届毕业生', description: '研发岗位介绍与现场简历交流。', registrationUrl: null, deadline: null, evidence: '9月24日14:30，大学生活动中心201' },
@@ -27,6 +27,7 @@ const ongoingEvent: ActivityInput = {
 
 test('schedule extracts followed messages with concurrent pi agents, persists activities and supports weekly filters and sources', async () => {
   const fixture = await mockNapCat();
+  fixture.completeHistoryAtBoundary();
   const root = await mkdtemp(path.join(os.tmpdir(), 'chancekit-schedule-e2e-'));
   let requests = 0, active = 0, peak = 0, visionCalls = 0;
   const endpoint = createServer(async (request, response) => {
@@ -41,14 +42,18 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
       expect(user.content.some((part: any) => part.type === 'image_url')).toBe(true);
     }
     const input = visual ? {} : JSON.parse(text);
-    const activity = [...events, ongoingEvent].find(event => `${input.currentMessage ?? ''}\n${input.linkedContent ?? ''}`.includes(event.title))
-      ?? (input.linkedContent?.includes('Recruitment fair:') ? events[0] : undefined);
-    const output = visual ? { text: `${events[0].title}\n${events[0].evidence}`, unreadable: false } : { activities: activity ? [activity] : [] };
+    const sources = visual ? [] : input.sources ?? [];
+    const extracted = [...events, ongoingEvent].flatMap(event => {
+      const sourceRefs = sources.filter((source: any) => `${source.message}\n${source.extractedContent}`.includes(event.title)
+        || event === events[0] && source.extractedContent?.includes('Recruitment fair:')).map((source: any) => source.source);
+      return sourceRefs.length ? [{ ...event, sourceRefs }] : [];
+    });
+    const output = visual ? { text: `${events[0].title}\n${events[0].evidence}`, unreadable: false } : { activities: extracted };
     requests++; active++; peak = Math.max(peak, active);
     await new Promise(resolve => setTimeout(resolve, 180));
     active--;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    response.write(`data: ${JSON.stringify({ id: 'test', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: visual ? 'submit_visual_text' : 'submit_activities', arguments: JSON.stringify(output) } }] }, finish_reason: 'tool_calls' }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ id: 'test', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: visual ? 'submit_visual_text' : 'submit_daily_activities', arguments: JSON.stringify(output) } }] }, finish_reason: 'tool_calls' }] })}\n\n`);
     response.end('data: [DONE]\n\n');
   });
   endpoint.listen(0, '127.0.0.1');
@@ -62,7 +67,29 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     let page = await app.firstWindow();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.getByRole('button', { name: '模型配置', exact: true }).click();
+    const startOneTimeSync = async () => {
+      const button = page.getByRole('button', { name: /^(开始同步|再次同步)$/ });
+      await expect(button).toBeEnabled();
+      await button.click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toContainText('同步会产生 API 费用');
+      await dialog.getByRole('button', { name: '开始同步', exact: true }).click();
+    };
+    const closeSyncDetails = async () => {
+      const close = page.getByRole('button', { name: '关闭同步详情', exact: true });
+      if (await close.isVisible()) await close.click();
+    };
+    const waitForSyncToStop = async (keepOpen = false) => {
+      await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).enabled, { timeout: 20000 }).toBe(false);
+      if (!keepOpen) await closeSyncDetails();
+    };
+    const waitForDayToSettle = async () => {
+      await expect.poll(async () => {
+        const status = await page.evaluate(() => window.desktop!.processingStatus());
+        return status.completed + status.partial + status.failed;
+      }, { timeout: 20000 }).toBe(1);
+    };
+    await page.getByRole('button', { name: '设置', exact: true }).click();
     await page.getByLabel('服务商', { exact: true }).selectOption('custom');
     await page.getByLabel('API 地址', { exact: true }).fill(baseUrl);
     await page.getByLabel('模型 ID', { exact: true }).fill('schedule-test-model');
@@ -79,14 +106,24 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     fixture.push(sample(107, '未关注的消息不能发给模型', 731234568));
     await page.getByRole('button', { name: '日程', exact: true }).click();
     await expect(page.getByRole('heading', { name: '日程', exact: true })).toBeVisible();
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(6);
+    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(1);
     expect(requests).toBe(0);
-    await page.getByRole('switch', { name: '自动处理' }).click();
-    await expect(page.getByRole('dialog').getByText(/可能产生 API 费用/)).toBeVisible();
-    await page.getByRole('button', { name: '开启处理', exact: true }).click();
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).completed, { timeout: 20000 }).toBe(6);
-    expect(requests).toBe(6);
-    expect(peak).toBe(3);
+    await startOneTimeSync();
+    const stages = page.getByRole('list', { name: '同步阶段' });
+    await expect(stages).toContainText('读取消息');
+    await expect(stages).toContainText('AI 整理');
+    await expect(stages).toContainText('完成');
+    await waitForDayToSettle();
+    await waitForSyncToStop(true);
+    await expect(page.getByText(/本次同步已完成|部分消息需要处理/)).toBeVisible();
+    const syncDialog = page.getByRole('dialog');
+    await expect(syncDialog.getByRole('navigation', { name: '消息整理状态' })).toContainText('待整理');
+    await syncDialog.getByRole('button', { name: /已完成/ }).click();
+    await expect(syncDialog.getByRole('region', { name: '已完成消息列表' })).toContainText('星河科技校园宣讲会');
+    await page.screenshot({ path: 'test-results/schedule-sync-details.png' });
+    await closeSyncDetails();
+    expect(requests).toBe(1);
+    expect(peak).toBe(1);
     await page.getByLabel('跳转日期').fill('2026-09-24');
     await expect(page.getByRole('button', { name: '查看活动：星河科技校园宣讲会', exact: true })).toHaveCount(1);
     await expect(page.getByRole('button', { name: '查看活动：秋季校园双选会', exact: true })).toHaveCount(0);
@@ -94,7 +131,7 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     await expect(page.getByRole('region', { name: '日期待确认' })).toContainText('研究院实习交流会');
     await page.screenshot({ path: 'test-results/schedule-desktop.png' });
     await page.getByRole('button', { name: '查看活动：星河科技校园宣讲会', exact: true }).click();
-    await expect(page.getByRole('dialog')).toContainText('消息来源 · 2');
+    await expect(page.getByRole('dialog')).toContainText('完整原始信息 · 2 条');
     await page.getByRole('dialog').locator('summary').first().click();
     await expect(page.getByRole('dialog')).toContainText('9月24日14:30');
     await page.screenshot({ path: 'test-results/schedule-detail.png' });
@@ -113,18 +150,30 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(900, 640));
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: 'test-results/schedule-900.png' });
+    const beforeNewMessage = requests;
     fixture.push(sample(108, '新到达的无活动消息'));
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).completed).toBe(7);
-    expect(requests).toBe(7);
+    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(1);
+    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(requests).toBe(beforeNewMessage);
+    await startOneTimeSync();
+    await expect.poll(() => requests).toBeGreaterThanOrEqual(2);
+    expect(requests).toBeGreaterThanOrEqual(2);
+    await waitForSyncToStop();
     const poster = await sharp({ create: { width: 120, height: 100, channels: 3, background: '#567843' } }).png().toBuffer();
     fixture.respond('get_image', () => ({ base64: poster.toString('base64') }));
     fixture.push({ ...sample(110, ''), message: [{ type: 'image', data: { file: 'fixture-poster.png', file_size: poster.length } }] });
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).completed, { timeout: 20000 }).toBe(8);
-    expect(visionCalls).toBe(1);
-    expect(requests).toBe(9);
+    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(1);
+    await startOneTimeSync();
+    await expect.poll(() => visionCalls, { timeout: 20000 }).toBe(1);
+    await expect.poll(() => requests).toBeGreaterThanOrEqual(4);
+    expect(requests).toBeGreaterThanOrEqual(4);
     expect(fixture.calls.some(call => call.action === 'get_image')).toBe(true);
+    await waitForSyncToStop();
     fixture.push(sample(111, `${ongoingEvent.title}\n${ongoingEvent.evidence}`));
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).completed).toBe(9);
+    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(1);
+    await startOneTimeSync();
+    await waitForDayToSettle();
+    await waitForSyncToStop();
     const ongoing = page.getByRole('region', { name: '跨期事项', exact: true });
     await expect(ongoing.getByRole('button', { name: `查看活动：${ongoingEvent.title}` })).toHaveCount(1);
     await expect(page.getByRole('table').getByRole('button', { name: `查看活动：${ongoingEvent.title}` })).toHaveCount(0);
@@ -148,48 +197,48 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     await ongoing.screenshot({ path: 'test-results/schedule-ongoing-desktop.png' });
     const pdf = pdfFixture();
     fixture.respond('get_group_file_url', () => ({ base64: pdf.toString('base64') }));
+    const beforePdf = requests;
     fixture.push({ ...sample(112, ''), message: [{ type: 'file', data: { name: 'recruitment.pdf', file_id: 'fixture-pdf', file_size: pdf.length } }] });
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).completed, { timeout: 20000 }).toBe(10);
+    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(1);
+    await startOneTimeSync();
+    await expect.poll(() => requests, { timeout: 20000 }).toBeGreaterThan(beforePdf);
     expect(visionCalls).toBe(1);
-    expect(requests).toBe(11);
+    await waitForSyncToStop();
     const jpeg = await sharp({ create: { width: 600, height: 300, channels: 3, background: '#ffffff' } }).jpeg().toBuffer();
     const scan = pdfFixture({ jpeg });
     fixture.respond('get_group_file_url', () => ({ base64: scan.toString('base64') }));
     fixture.push({ ...sample(113, ''), message: [{ type: 'file', data: { name: 'scanned.pdf', file_id: 'fixture-scan', file_size: scan.length } }] });
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).completed, { timeout: 20000 }).toBe(11);
-    expect(visionCalls).toBe(2);
-    expect(requests).toBe(13);
+    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(1);
+    await startOneTimeSync();
+    await expect.poll(() => visionCalls, { timeout: 20000 }).toBeGreaterThanOrEqual(2);
+    await waitForSyncToStop();
+    const beforeLong = requests;
     fixture.push(sample(114, `${events[0].title}\n${events[0].evidence}，结束时间16:00。欢迎应届毕业生携带简历参加，现场将介绍研发岗位、培养安排与工作内容，并提供面对面的交流答疑。`));
-    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).completed).toBe(12);
-    expect(requests).toBe(14);
-    expect((await page.evaluate(() => window.desktop!.processingStatus())).partial).toBe(0);
+    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(1);
+    await startOneTimeSync();
+    await expect.poll(() => requests).toBeGreaterThan(beforeLong);
+    await waitForSyncToStop();
     await page.getByRole('button', { name: `查看活动：${events[0].title}`, exact: true }).click();
     await page.getByRole('dialog').locator('summary').first().click();
-    const notes = page.getByRole('dialog').locator('details').filter({ has: page.locator('summary', { hasText: '材料读取记录' }) }).last();
-    await expect(notes.locator('summary')).toBeVisible();
-    await expect(notes).not.toHaveAttribute('open');
-    await expect(notes.getByText('已从原消息确认日程，补充网页与图片未展开。', { exact: true })).not.toBeVisible();
-    await notes.locator('summary').click();
-    await expect(notes).toContainText('已从原消息确认日程');
     await page.getByRole('button', { name: '关闭活动详情' }).click();
-    await page.getByRole('switch', { name: '自动处理' }).click();
-    await expect(page.getByRole('switch', { name: '自动处理' })).not.toBeChecked();
     fixture.push(sample(109, '已暂停的新消息'));
     await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).pending).toBe(1);
-    expect(requests).toBe(14);
+    const pausedRequests = requests;
+    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(requests).toBe(pausedRequests);
     expect(errors).toEqual([]);
     await app.close();
     app = await electron.launch({ args: ['.'], env });
     page = await app.firstWindow();
     await page.getByRole('button', { name: '日程', exact: true }).click();
     await page.getByLabel('跳转日期').fill('2026-09-24');
-    await expect(page.getByRole('switch', { name: '自动处理' })).not.toBeChecked();
+    await expect(page.getByRole('button', { name: '开始同步', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '查看活动：星河科技校园宣讲会', exact: true })).toBeVisible();
     await expect(page.getByRole('region', { name: '跨期事项' })).toContainText(ongoingEvent.title);
-    expect(requests).toBe(14);
+    expect(requests).toBe(pausedRequests);
     const status = await page.evaluate(() => window.desktop!.processingStatus());
     expect(status.pending).toBe(1);
-    expect(status.completed).toBe(12);
+    expect(status.completed).toBe(0);
   } finally {
     await app?.close();
     endpoint.closeAllConnections();
@@ -208,14 +257,14 @@ test('populated ongoing section and its detail fit desktop and mobile without re
     ({ ...activity, id: String(index), sourceCount: 1, groupNames: ['测试关注群'], needsReview: false, updatedAt: 0 }));
   const state: AppState = { phase: 'idle', detail: '未连接', runtime: null, groups: [], archived: 4, historyBusy: false, logs: [] };
   try {
-    await page.addInitScript(({ state, activities, status }) => {
+    await page.addInitScript(({ state, activities, status, details }) => {
       window.desktop = {
         request: async () => state, subscribe: () => () => {}, savedConnection: async () => ({}),
         schedule: async () => ({ activities, undated: [] }),
         activity: async (id: string) => ({ activity: activities.find(activity => activity.id === id)!, sources: [] }),
-        processingStatus: async () => status,
+        processingStatus: async () => status, processingDetails: async () => details,
       } as unknown as DesktopBridge;
-    }, { state, activities, status: emptyProcessingStatus });
+    }, { state, activities, status: emptyProcessingStatus, details: emptyProcessingDetails });
     await page.goto(server.resolvedUrls!.local[0]);
     await page.getByRole('button', { name: '日程', exact: true }).click();
     await page.getByLabel('跳转日期').fill('2026-09-24');
@@ -246,6 +295,59 @@ test('populated ongoing section and its detail fit desktop and mobile without re
   } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
 });
 
+test('sync details show message images, open links externally and emphasize stopping', async () => {
+  const server = await preview({ preview: { host: '127.0.0.1', port: 5197, strictPort: false } });
+  const browser = await chromium.launch({ channel: 'chrome' });
+  const page = await browser.newPage();
+  const poster = await sharp({ create: { width: 320, height: 180, channels: 3, background: '#53765f' } }).png().toBuffer();
+  const state: AppState = {
+    phase: 'online', detail: '已连接', runtime: 'managed', archived: 1, historyBusy: false, logs: [],
+    account: { id: '10001', nickname: '测试账号' }, localAccount: { id: '10001', nickname: '测试账号' },
+    groups: [{ id: '731234567', name: '就业信息群', memberCount: 100, maxMembers: 500, followed: true, messageCount: 1 }],
+  };
+  const status = { ...emptyProcessingStatus, processorVersion: 3, enabled: true, since: 1, pending: 1 };
+  const details = {
+    total: 1, hasMore: false, counts: { pending: 1, running: 0, completed: 0 },
+    items: [{ key: 'message-1', bucket: 'pending' as const, state: 'pending' as const, groupName: '就业信息群', senderName: '就业老师',
+      messageTime: Date.parse('2026-09-21T04:00:00Z') / 1000,
+      text: '宣讲会详情和报名入口：https://jobs.example.com/campus/apply', contentTypes: ['text', 'image'],
+      images: [{ segmentIndex: 1, url: 'https://assets.example.com/poster.png' }],
+      links: [{ title: '分享的宣讲会通知', url: 'https://jobs.example.com/news' }], activityTitles: [], error: '' }],
+  };
+  try {
+    await page.route('https://assets.example.com/poster.png', route => route.fulfill({ status: 200, contentType: 'image/png', body: poster }));
+    await page.addInitScript(({ state, status, details }) => {
+      (window as any).__openedLinks = [];
+      window.desktop = {
+        request: async () => state, subscribe: () => () => {}, savedConnection: async () => ({}),
+        schedule: async () => ({ activities: [], undated: [] }), activity: async () => null,
+        processingStatus: async () => status, processingDetails: async () => details,
+        configureProcessing: async (value: { enabled: boolean }) => ({ ...status, enabled: value.enabled }), retryProcessing: async () => status,
+        openExternal: async (url: string) => { (window as any).__openedLinks.push(url); },
+      } as unknown as DesktopBridge;
+    }, { state, status, details });
+    await page.goto(server.resolvedUrls!.local[0]);
+    await page.getByRole('button', { name: '日程', exact: true }).click();
+    await page.getByRole('button', { name: '查看同步进度', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    const image = dialog.getByRole('img', { name: '群消息图片' });
+    await expect(image).toBeVisible();
+    await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBe(320);
+    await dialog.getByRole('link', { name: 'https://jobs.example.com/campus/apply' }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__openedLinks)).toContain('https://jobs.example.com/campus/apply');
+    await dialog.getByRole('link', { name: '分享的宣讲会通知' }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__openedLinks)).toContain('https://jobs.example.com/news');
+    const stop = dialog.getByRole('button', { name: '停止同步', exact: true });
+    await expect(stop).toBeVisible();
+    expect(await stop.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(166, 71, 61)');
+    for (const width of [1000, 375]) {
+      await page.setViewportSize({ width, height: 820 });
+      expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await page.screenshot({ path: `test-results/schedule-sync-media-${width}.png` });
+    }
+  } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
+});
+
 test('schedule browser preview has real empty states and responsive navigation down to 320px', async () => {
   const server = await preview({ preview: { host: '127.0.0.1', port: 5195, strictPort: false } });
   const browser = await chromium.launch({ channel: 'chrome' });
@@ -253,12 +355,12 @@ test('schedule browser preview has real empty states and responsive navigation d
   try {
     await page.goto(server.resolvedUrls!.local[0]);
     await page.getByRole('button', { name: '日程', exact: true }).click();
-    await expect(page.getByRole('switch', { name: '自动处理' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '开始同步', exact: true })).toBeDisabled();
     await expect(page.getByText('这一天暂无活动', { exact: true })).toBeVisible();
     for (const width of [1280, 900, 760, 375, 320]) {
       await page.setViewportSize({ width, height: 820 });
       await expect(page.getByRole('heading', { name: '日程', exact: true })).toBeVisible();
-      for (const name of ['群消息', '日程', '连接 QQ', '模型配置']) await expect(page.getByRole('button', { name, exact: true }).first()).toBeVisible();
+      for (const name of ['群消息', '日程', '设置']) await expect(page.getByRole('button', { name, exact: true }).first()).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       expect(await page.locator('section[aria-label="日程"]').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: `test-results/schedule-preview-${width}.png` });
