@@ -21,8 +21,11 @@ test('the macOS runtime loader handles a pre-login stop with a clean Electron ex
     await writeFile(stub, `import fs from 'node:fs';
       const exit = process.exit;
       let requested = false;
-      process.exit = code => { requested = true; exit(code); };
-      process.on('exit', code => fs.writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ code, requested })));
+      process.exit = code => {
+        requested = true;
+        fs.writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ code, requested }));
+        exit(code);
+      };
       fs.writeFileSync(${JSON.stringify(ready)}, 'ready');
       setInterval(() => {}, 1000);
     `);
