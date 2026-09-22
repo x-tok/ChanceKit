@@ -17,6 +17,11 @@ test('release versions must agree and suffix versions cannot be published as sta
   assert.equal(releaseInfo(beta, beta, true).tag, 'v0.2.0-beta.1');
 });
 
+test('manual releases default to a stable Latest release', async () => {
+  const workflow = await readFile('.github/workflows/release.yml', 'utf8');
+  assert.match(workflow, /prerelease:\n\s+description: Publish as a pre-release instead of the Latest release\n\s+type: boolean\n\s+default: false/);
+});
+
 function fakeGitHub(failure = '') {
   const calls = [];
   const assets = [];

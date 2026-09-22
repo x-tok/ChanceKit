@@ -259,7 +259,7 @@ npm run test:e2e
 
 ### GitHub 手动发布
 
-打开 [Actions → Release ChanceKit](https://github.com/x-tok/ChanceKit/actions/workflows/release.yml)，点击 **Run workflow**，选择 `main` 后运行。版本号读取所选提交的 `package.json`，默认勾选预览版；工作流会构建 macOS arm64/x64 和 Windows x64 安装包，内置 NapCat，并在检查通过后创建 `v版本号` 的 Release。
+打开 [Actions → Release ChanceKit](https://github.com/x-tok/ChanceKit/actions/workflows/release.yml)，点击 **Run workflow**，选择 `main` 后运行。版本号读取所选提交的 `package.json`，默认发布正式版并标记为 Latest；需要预览版时再勾选预发布选项。工作流会构建 macOS arm64/x64 和 Windows x64 安装包，内置 NapCat，并在检查通过后创建 `v版本号` 的 Release。
 
 **普通 push、推送 tag 和 Pull Request 都不会触发发布。** 不需要提前创建 tag、上传安装包或配置签名证书。新版本发布前应同步更新 `package.json` 与 `package-lock.json` 的版本并推送；已有版本不会被覆盖。步骤、失败重试和平台验证边界见[发布说明](docs/releases.md)。
 
