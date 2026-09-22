@@ -6,9 +6,8 @@ Release: https://github.com/NapNeko/NapCatQQ/releases/tag/v4.18.28
 Upstream license: https://github.com/NapNeko/NapCatQQ/blob/v4.18.28/LICENSE
 
 The full upstream license is included as LICENSE.txt beside the packaged archive.
-Additional written permission for ChanceKit's bundled redistribution is pending
-confirmation from the main NapCatQQ author. Do not publish the bundled installer
-until that permission is recorded.
+Redistribution is subject to that license, including its notice and non-commercial
+use requirements. NapCatQQ is not relicensed under the ChanceKit license.
 
 NapCat and its included dependencies retain their upstream licenses and notices.
 The archive contains no user profiles, credentials or runtime caches.

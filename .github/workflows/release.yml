@@ -27,10 +27,14 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Require recorded NapCat redistribution permission
+      - name: Verify bundled NapCat license and source notice
         run: |
-          test -f licenses/NapCatQQ-AUTHORIZATION.md
-          grep -q '^Authorization-Status: granted$' licenses/NapCatQQ-AUTHORIZATION.md
+          test -s licenses/NapCatQQ-v4.18.28-LICENSE.txt
+          test -s resources/napcat/NOTICE.md
+          grep -Fqx 'Limited Redistribution License for NapCat' licenses/NapCatQQ-v4.18.28-LICENSE.txt
+          grep -Fqx 'Copyright © 2024 Mlikiowa' licenses/NapCatQQ-v4.18.28-LICENSE.txt
+          grep -Fq 'Source: https://github.com/NapNeko/NapCatQQ/tree/v4.18.28' resources/napcat/NOTICE.md
+          grep -Fq 'The full upstream license is included as LICENSE.txt' resources/napcat/NOTICE.md
       - name: Validate version and check for an existing release
         id: plan
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7

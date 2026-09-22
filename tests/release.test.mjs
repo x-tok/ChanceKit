@@ -22,6 +22,19 @@ test('manual releases default to a stable Latest release', async () => {
   assert.match(workflow, /prerelease:\n\s+description: Publish as a pre-release instead of the Latest release\n\s+type: boolean\n\s+default: false/);
 });
 
+test('release preparation verifies the bundled NapCat license that exists in the repository', async () => {
+  const workflow = await readFile('.github/workflows/release.yml', 'utf8');
+  const license = await readFile('licenses/NapCatQQ-v4.18.28-LICENSE.txt', 'utf8');
+  const notice = await readFile('resources/napcat/NOTICE.md', 'utf8');
+  assert.match(workflow, /test -s licenses\/NapCatQQ-v4\.18\.28-LICENSE\.txt/);
+  assert.match(workflow, /test -s resources\/napcat\/NOTICE\.md/);
+  assert.doesNotMatch(workflow, /NapCatQQ-AUTHORIZATION\.md/);
+  assert.match(license, /^Limited Redistribution License for NapCat$/m);
+  assert.match(license, /^Copyright © 2024 Mlikiowa$/m);
+  assert.match(notice, /^Source: https:\/\/github\.com\/NapNeko\/NapCatQQ\/tree\/v4\.18\.28$/m);
+  assert.match(notice, /^The full upstream license is included as LICENSE\.txt beside the packaged archive\.$/m);
+});
+
 function fakeGitHub(failure = '') {
   const calls = [];
   const assets = [];

@@ -4,7 +4,7 @@
 
 **不让机会淹没在消息里。**
 
-> ChanceKit 自有代码采用 PolyForm Noncommercial 1.0.0，仅允许非商业用途。安装包内置 NapCatQQ 的书面再分发授权正在向上游确认；授权记录完成前不发布新的公开安装包。
+> ChanceKit 自有代码采用 PolyForm Noncommercial 1.0.0，仅允许非商业用途。安装包内置的 NapCatQQ 继续适用其受限非商业再分发许可证，并随包提供完整许可证、来源和版权信息。
 
 见机是一个面向就业信息整理的本地桌面应用。从关注的 QQ 群收集消息，保存到本机，方便查找招聘通知、宣讲会和双选会信息。
 
@@ -322,6 +322,6 @@ DESIGN.md               界面设计约定
 
 ChanceKit 自有代码采用 [PolyForm Noncommercial 1.0.0](LICENSE)，允许个人学习、研究、实验及许可证列明的其他非商业用途；它不是允许商业使用的开源许可证。贡献者提交内容前应阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-NapCatQQ 4.18.28 及其依赖保留各自上游许可。当前内置再分发方式的书面授权正在向 NapCatQQ 主作者确认；取得并记录明确授权前，不发布新的公开安装包。[第三方许可说明](THIRD_PARTY_NOTICES.md)列出来源、原始许可证和分发边界，[免责声明](DISCLAIMER.md)说明使用风险。QQ 的名称和软件属于其权利人，见机不是腾讯官方产品。
+NapCatQQ 4.18.28 及其依赖保留各自上游许可。安装包使用未经修改的官方发布包，并附带完整许可证、来源和版权信息；不得将其用于商业用途。[第三方许可说明](THIRD_PARTY_NOTICES.md)列出来源、原始许可证和分发边界，[免责声明](DISCLAIMER.md)说明使用风险。QQ 的名称和软件属于其权利人，见机不是腾讯官方产品。
 
 更多实现细节见 [QQ 接入说明](docs/integration.md)、[安装与发布说明](docs/releases.md)和 [设计约定](DESIGN.md)。
