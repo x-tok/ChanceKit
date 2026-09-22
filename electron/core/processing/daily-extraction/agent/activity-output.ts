@@ -1,12 +1,11 @@
 import { Type } from 'typebox';
 import { z } from 'zod';
-import type { AgentTool } from '@earendil-works/pi-agent-core';
-import { activityTypes } from '../../../../../../src/schedule';
-import { activitySchema } from '../../../activity-schema';
-import type { DailyActivityOutput } from '../../types';
+import { activityTypes } from '../../../../../src/schedule';
+import { activitySchema } from '../../activity-schema';
+import type { DailyActivityOutput } from '../types';
 
 const nullableString = (description: string) => Type.Union([Type.String({ description }), Type.Null()]);
-const activityParameters = Type.Object({
+const activityOutputSchema = Type.Object({
   title: Type.String({ minLength: 1, maxLength: 200 }),
   type: Type.Union(activityTypes.map(value => Type.Literal(value))),
   organizer: Type.String({ maxLength: 200 }),
@@ -23,9 +22,11 @@ const activityParameters = Type.Object({
   sourceRefs: Type.Array(Type.Integer({ minimum: 1 }), { minItems: 1, maxItems: 200 }),
 }, { additionalProperties: false });
 
-export const dailyExtractionParameters = Type.Object({
-  activities: Type.Array(activityParameters, { maxItems: 80 }),
+const typeboxOutputSchema = Type.Object({
+  activities: Type.Array(activityOutputSchema, { maxItems: 80 }),
 }, { additionalProperties: false });
+
+export const dailyActivityOutputJsonSchema = JSON.parse(JSON.stringify(typeboxOutputSchema)) as Record<string, unknown>;
 
 const submissionSchema = z.object({
   activities: z.array(z.record(z.string(), z.unknown())).max(80),
@@ -40,25 +41,4 @@ export function parseDailySubmission(input: unknown, availableRefs: Set<number>)
     if (refs.some(ref => !availableRefs.has(ref))) throw new Error('活动引用了当前批次之外的来源。');
     return { ...activitySchema.parse(rawActivity), sourceRefs: refs };
   });
-}
-
-export function createSubmitDailyActivitiesTool(
-  availableRefs: Set<number>, allowedLinks: Set<string>, submit: (value: DailyActivityOutput) => void,
-): AgentTool<typeof dailyExtractionParameters> {
-  let submitted = false;
-  return {
-    name: 'submit_daily_activities', label: '整理当日活动',
-    description: 'Submit deduplicated recruiting activities and the source reference numbers that support each one.',
-    parameters: dailyExtractionParameters, executionMode: 'sequential' as const,
-    async execute(_id: string, input: unknown) {
-      if (submitted) throw new Error('本批次已经提交。');
-      const value = parseDailySubmission(input, availableRefs);
-      for (const activity of value) {
-        if (activity.registrationUrl && !allowedLinks.has(activity.registrationUrl)) activity.registrationUrl = null;
-      }
-      submitted = true;
-      submit(value);
-      return { content: [{ type: 'text' as const, text: 'Daily activities accepted.' }], details: {}, terminate: true };
-    },
-  };
 }

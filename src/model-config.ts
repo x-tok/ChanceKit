@@ -54,6 +54,8 @@ export interface ModelTestResult {
   outputTokens: number;
 }
 
+export const recommendedMaxOutputTokens = 32_768;
+
 function preset(
   id: ModelProvider, name: string, api: ModelApi, baseUrl: string,
   models: Omit<ModelCatalogEntry, 'api' | 'baseUrl'>[],
@@ -89,7 +91,7 @@ export function configForProvider(provider: ModelProviderEntry, model = provider
   return {
     provider: provider.id, api: model?.api ?? provider.api, baseUrl: model?.baseUrl ?? provider.baseUrl,
     modelId: model?.id ?? '', contextWindow: model?.contextWindow ?? 128000,
-    maxTokens: Math.min(4096, model?.maxTokens ?? 4096), temperature: 1,
+    maxTokens: Math.min(recommendedMaxOutputTokens, model?.maxTokens ?? 4096, model?.contextWindow ?? 128000), temperature: 1,
     reasoning: model?.reasoning ?? false, reasoningLevel: model?.reasoningLevels?.[0] ?? 'off',
     imageInput: model?.imageInput ?? false,
   };
