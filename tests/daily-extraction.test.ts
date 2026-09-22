@@ -219,7 +219,11 @@ test('processing details separate pending, running and completed messages and re
   const { messages, daily } = await fixture(t);
   const time = Date.parse('2026-09-21T04:00:00Z') / 1000;
   messages.put([
-    normalizeMessage({ ...sample(1, '星河科技宣讲会通知'), time }, 'a'),
+    normalizeMessage({ ...sample(1, '星河科技宣讲会通知'), time, message: [
+      { type: 'text', data: { text: '星河科技宣讲会通知' } },
+      { type: 'image', data: { file: 'poster.jpg', url: 'https://multimedia.example.com/poster.jpg' } },
+      { type: 'json', data: { data: JSON.stringify({ meta: { news: { title: '宣讲会通知', jumpUrl: 'https://jobs.example.com/news' } } }) } },
+    ] }, 'a'),
     normalizeMessage({ ...sample(2, '谢谢，收到'), time: time + 60 }, 'a'),
   ]);
   daily.enqueue('a');
@@ -227,6 +231,10 @@ test('processing details separate pending, running and completed messages and re
   const pending = daily.details('a', { bucket: 'pending', since });
   assert.equal(pending.total, 2);
   assert.deepEqual(pending.counts, { pending: 2, running: 0, completed: 0 });
+  assert.deepEqual(pending.items.find(item => item.text.includes('星河科技'))?.images,
+    [{ segmentIndex: 1, url: 'https://multimedia.example.com/poster.jpg' }]);
+  assert.deepEqual(pending.items.find(item => item.text.includes('星河科技'))?.links,
+    [{ url: 'https://jobs.example.com/news', title: '宣讲会通知' }]);
 
   const job = daily.claim('a')!;
   const running = daily.details('a', { bucket: 'running', since });

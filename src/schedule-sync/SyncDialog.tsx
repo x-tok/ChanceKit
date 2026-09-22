@@ -5,6 +5,7 @@ import { emptyProcessingDetails, type ProcessingDetailsPage, type ProcessingMess
 import type { InitialSyncProgress } from '../onboarding/initial-sync';
 import common from '../App.module.css';
 import s from './SyncDialog.module.css';
+import { LinkifiedText, MessageImages, MessageLinks } from './MessageContent';
 
 const tabs: { bucket: ProcessingMessageBucket; label: string }[] = [
   { bucket: 'pending', label: '待整理' },
@@ -31,14 +32,16 @@ function itemState(item: ProcessingMessageItem) {
   return '等待整理';
 }
 
-function MessageItem({ item }: { item: ProcessingMessageItem }) {
-  const content = item.contentTypes.filter(type => type !== 'text').map(type => contentLabels[type]).filter(Boolean);
+function MessageItem({ item, onError }: { item: ProcessingMessageItem; onError: (message: string) => void }) {
+  const content = item.contentTypes.filter(type => type !== 'text' && type !== 'image').map(type => contentLabels[type]).filter(Boolean);
   return <li className={s.messageItem}>
     <div className={s.messageMeta}>
       <strong>{item.groupName}</strong><span>{item.senderName}</span><time>{messageTime(item.messageTime)}</time>
       <small data-state={item.state}>{itemState(item)}</small>
     </div>
-    <p>{item.text || '这条消息没有可显示的文字内容'}</p>
+    <LinkifiedText text={item.text || '这条消息没有可显示的文字内容'} onError={onError} />
+    <MessageImages images={item.images} onError={onError} />
+    <MessageLinks links={item.links} onError={onError} />
     {content.length > 0 && <div className={s.contentTypes}>{content.map(({ label, icon: Icon }) => <span key={label}><Icon size={12} />{label}</span>)}</div>}
     {item.activityTitles.length > 0 && <div className={s.outputs} aria-label="提取的日程">
       {item.activityTitles.map(title => <span key={title}><Check size={12} />{title}</span>)}
@@ -143,14 +146,14 @@ export function SyncDialog({ open, onClose, status, progress, since, groups, bus
       </button>)}
     </nav>
     <div className={s.messageList} role="region" aria-label={`${tabs.find(tab => tab.bucket === bucket)!.label}消息列表`} aria-busy={loading}>
-      {details.items.length > 0 ? <ul>{details.items.map(item => <MessageItem key={item.key} item={item} />)}</ul>
+      {details.items.length > 0 ? <ul>{details.items.map(item => <MessageItem key={item.key} item={item} onError={setDetailsError} />)}</ul>
         : <div className={s.empty}>{loading ? <LoaderCircle size={20} className={common.spin} /> : <CircleEllipsis size={22} />}<strong>{loading ? '正在读取消息' : empty}</strong></div>}
       {details.hasMore && <button className={`${common.secondaryButton} ${s.loadMore}`} disabled={loading} onClick={() => void load(true)}>加载更多</button>}
     </div>
 
     <footer className={s.footer}>
       <p><strong>同步会产生 API 费用，请留意账户额度。</strong><span>每次完成后自动停止。</span></p>
-      {reading || organizing ? <button className={common.secondaryButton} disabled={busy && !reading} onClick={onStop}><Square size={14} />停止同步</button>
+      {reading || organizing ? <button className={s.stopButton} disabled={busy && !reading} onClick={onStop}><Square size={14} />停止同步</button>
         : <button className={common.primaryButton} disabled={!canStart || busy} onClick={onStart}><CloudDownload size={15} />{settled ? '再次同步' : '开始同步'}</button>}
     </footer>
   </dialog>;

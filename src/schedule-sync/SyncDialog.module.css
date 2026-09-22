@@ -42,7 +42,14 @@
 .messageMeta small { margin-left: auto; color: #6c7b72; font-size: 10px; }
 .messageMeta small[data-state='running'] { color: #246c4f; }
 .messageMeta small[data-state='failed'], .messageMeta small[data-state='partial'] { color: #946014; }
-.messageItem > p { margin-top: 8px; color: #334039; font-size: 12px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.messageText { margin-top: 8px; color: #334039; font-size: 12px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.messageText a { color: #216749; font-weight: 500; text-decoration: underline; text-decoration-color: #21674966; text-underline-offset: 2px; }
+.messageImages { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.imageLink { display: block; width: 112px; height: 82px; overflow: hidden; border: 1px solid #d8e0db; border-radius: 6px; background: #f2f5f3; }
+.imageLink img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform 160ms ease-out; }
+.imageFallback { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 7px 9px; border: 1px solid #dfe5e1; border-radius: 5px; color: var(--muted); background: #f5f7f6; font-size: 10px; }
+.messageLinks { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.messageLinks a { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 7px; border: 1px solid #d8e4dc; border-radius: 4px; background: #f2f8f4; color: #216749; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .contentTypes, .outputs { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .contentTypes span, .outputs span { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 3px 7px; border-radius: 4px; background: #eef2ef; color: #5d6b63; font-size: 10px; line-height: 1.4; }
 .outputs span { background: #eaf3ed; color: #246c4f; }
@@ -57,9 +64,12 @@
 .footer p strong { color: #72501c; }
 .footer p span { color: var(--muted); }
 .footer > button { flex-shrink: 0; }
+.stopButton { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 14px; border: 1px solid #923f37; border-radius: 6px; color: white; background: #a6473d; font: inherit; font-size: 12px; font-weight: 600; box-shadow: 0 1px 2px #692a2426; transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
+.stopButton:focus-visible { outline: 3px solid #a6473d33; outline-offset: 2px; }
+.stopButton:disabled { border-color: #c8aaa6; background: #c8aaa6; box-shadow: none; cursor: not-allowed; }
 @keyframes dialogEnter { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes backdropEnter { from { opacity: 0; } to { opacity: 1; } }
-@media (hover: hover) { .tabs button:hover { color: var(--ink); } .messageItem:hover { background: #fafcfb; } }
+@media (hover: hover) { .tabs button:hover { color: var(--ink); } .messageItem:hover { background: #fafcfb; } .messageText a:hover { color: #164c35; } .imageLink:hover img { transform: scale(1.035); } .stopButton:not(:disabled):hover { border-color: #7f342d; background: #913b33; } }
 @media (max-width: 620px) {
   .dialog { width: calc(100% - 20px); height: calc(100dvh - 20px); max-height: calc(100dvh - 20px); }
   .header, .overview, .footer { padding-left: 16px; padding-right: 16px; }

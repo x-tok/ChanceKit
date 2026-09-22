@@ -99,6 +99,8 @@ export interface ProcessingMessageItem {
   messageTime: number;
   text: string;
   contentTypes: string[];
+  images: { segmentIndex: number; url?: string }[];
+  links: { url: string; title: string }[];
   activityTitles: string[];
   error: string;
 }

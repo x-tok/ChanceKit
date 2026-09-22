@@ -294,6 +294,59 @@ test('populated ongoing section and its detail fit desktop and mobile without re
   } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
 });
 
+test('sync details show message images, open links externally and emphasize stopping', async () => {
+  const server = await preview({ preview: { host: '127.0.0.1', port: 5197, strictPort: false } });
+  const browser = await chromium.launch({ channel: 'chrome' });
+  const page = await browser.newPage();
+  const poster = await sharp({ create: { width: 320, height: 180, channels: 3, background: '#53765f' } }).png().toBuffer();
+  const state: AppState = {
+    phase: 'online', detail: '已连接', runtime: 'managed', archived: 1, historyBusy: false, logs: [],
+    account: { id: '10001', nickname: '测试账号' }, localAccount: { id: '10001', nickname: '测试账号' },
+    groups: [{ id: '731234567', name: '就业信息群', memberCount: 100, maxMembers: 500, followed: true, messageCount: 1 }],
+  };
+  const status = { ...emptyProcessingStatus, processorVersion: 3, enabled: true, since: 1, pending: 1 };
+  const details = {
+    total: 1, hasMore: false, counts: { pending: 1, running: 0, completed: 0 },
+    items: [{ key: 'message-1', bucket: 'pending' as const, state: 'pending' as const, groupName: '就业信息群', senderName: '就业老师',
+      messageTime: Date.parse('2026-09-21T04:00:00Z') / 1000,
+      text: '宣讲会详情和报名入口：https://jobs.example.com/campus/apply', contentTypes: ['text', 'image'],
+      images: [{ segmentIndex: 1, url: 'https://assets.example.com/poster.png' }],
+      links: [{ title: '分享的宣讲会通知', url: 'https://jobs.example.com/news' }], activityTitles: [], error: '' }],
+  };
+  try {
+    await page.route('https://assets.example.com/poster.png', route => route.fulfill({ status: 200, contentType: 'image/png', body: poster }));
+    await page.addInitScript(({ state, status, details }) => {
+      (window as any).__openedLinks = [];
+      window.desktop = {
+        request: async () => state, subscribe: () => () => {}, savedConnection: async () => ({}),
+        schedule: async () => ({ activities: [], undated: [] }), activity: async () => null,
+        processingStatus: async () => status, processingDetails: async () => details,
+        configureProcessing: async (value: { enabled: boolean }) => ({ ...status, enabled: value.enabled }), retryProcessing: async () => status,
+        openExternal: async (url: string) => { (window as any).__openedLinks.push(url); },
+      } as unknown as DesktopBridge;
+    }, { state, status, details });
+    await page.goto(server.resolvedUrls!.local[0]);
+    await page.getByRole('button', { name: '日程', exact: true }).click();
+    await page.getByRole('button', { name: '查看同步进度', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    const image = dialog.getByRole('img', { name: '群消息图片' });
+    await expect(image).toBeVisible();
+    await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBe(320);
+    await dialog.getByRole('link', { name: 'https://jobs.example.com/campus/apply' }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__openedLinks)).toContain('https://jobs.example.com/campus/apply');
+    await dialog.getByRole('link', { name: '分享的宣讲会通知' }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__openedLinks)).toContain('https://jobs.example.com/news');
+    const stop = dialog.getByRole('button', { name: '停止同步', exact: true });
+    await expect(stop).toBeVisible();
+    expect(await stop.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(166, 71, 61)');
+    for (const width of [1000, 375]) {
+      await page.setViewportSize({ width, height: 820 });
+      expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await page.screenshot({ path: `test-results/schedule-sync-media-${width}.png` });
+    }
+  } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
+});
+
 test('schedule browser preview has real empty states and responsive navigation down to 320px', async () => {
   const server = await preview({ preview: { host: '127.0.0.1', port: 5195, strictPort: false } });
   const browser = await chromium.launch({ channel: 'chrome' });

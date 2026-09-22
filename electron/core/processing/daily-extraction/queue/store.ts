@@ -354,10 +354,31 @@ export class DailyScheduleStore {
     const items = rows.map(row => {
       const message = JSON.parse(String(row.payload)) as Message;
       const state = String(row.status) as ProcessingMessageState;
+      const images = message.segments.flatMap((segment, segmentIndex) => {
+        if (segment.type !== 'image') return [];
+        let url: string | undefined;
+        try {
+          const parsed = new URL(String(segment.data.url ?? ''));
+          if (parsed.protocol === 'https:' && !parsed.username && !parsed.password) url = parsed.href;
+        } catch {}
+        return [{ segmentIndex, ...(url ? { url } : {}) }];
+      });
+      const links = message.segments.flatMap(segment => {
+        if (segment.type !== 'json') return [];
+        try {
+          const card = JSON.parse(String(segment.data.data ?? '')) as Record<string, unknown>;
+          const meta = Object.values(card.meta ?? {}).find(value => value && typeof value === 'object') as Record<string, unknown> | undefined;
+          const target = new URL(String(meta?.jumpUrl ?? meta?.qqdocurl ?? meta?.url ?? card.jumpUrl ?? ''));
+          if (!['https:', 'http:'].includes(target.protocol) || target.username || target.password) return [];
+          const title = String(meta?.title ?? meta?.desc ?? card.prompt ?? '打开分享链接').slice(0, 120);
+          return [{ url: target.href, title }];
+        } catch { return []; }
+      });
       return {
         key: String(row.key), bucket: query.bucket, state, groupName: String(row.name),
         senderName: message.senderName, messageTime: Number(row.time), text: String(row.text),
         contentTypes: [...new Set(message.segments.map(segment => segment.type))],
+        images, links,
         activityTitles: JSON.parse(String(row.activity_titles)) as string[], error: String(row.error),
       } satisfies ProcessingMessageItem;
     });
