@@ -34,7 +34,8 @@ export class DailyScheduleStore {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS schedule_settings (
         account_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, concurrency INTEGER NOT NULL DEFAULT 3,
-        stop_when_idle INTEGER NOT NULL DEFAULT 0, since INTEGER NOT NULL DEFAULT 0
+        stop_when_idle INTEGER NOT NULL DEFAULT 0, since INTEGER NOT NULL DEFAULT 0,
+        last_synced_at INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS schedule_daily_jobs (
         account_id TEXT NOT NULL, source_day TEXT NOT NULL, input_hash TEXT NOT NULL,
@@ -44,6 +45,10 @@ export class DailyScheduleStore {
         PRIMARY KEY(account_id,source_day)
       );
       CREATE INDEX IF NOT EXISTS schedule_daily_jobs_ready ON schedule_daily_jobs(account_id,status,available_at,source_day);
+      CREATE TABLE IF NOT EXISTS schedule_group_sync (
+        account_id TEXT NOT NULL, group_id TEXT NOT NULL, last_synced_at INTEGER NOT NULL,
+        PRIMARY KEY(account_id,group_id)
+      );
       CREATE TABLE IF NOT EXISTS schedule_jobs (
         message_key TEXT PRIMARY KEY REFERENCES messages(key), input_hash TEXT NOT NULL,
         status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, available_at INTEGER NOT NULL DEFAULT 0,
@@ -69,6 +74,9 @@ export class DailyScheduleStore {
     if (!settingColumns.includes('since')) {
       this.db.exec('ALTER TABLE schedule_settings ADD COLUMN since INTEGER NOT NULL DEFAULT 0');
     }
+    if (!settingColumns.includes('last_synced_at')) {
+      this.db.exec('ALTER TABLE schedule_settings ADD COLUMN last_synced_at INTEGER NOT NULL DEFAULT 0');
+    }
     const jobColumns = this.db.prepare('PRAGMA table_info(schedule_daily_jobs)').all().map(row => String(row.name));
     if (!jobColumns.includes('output_json')) {
       this.db.exec("ALTER TABLE schedule_daily_jobs ADD COLUMN output_json TEXT NOT NULL DEFAULT '[]'");
@@ -76,22 +84,37 @@ export class DailyScheduleStore {
     // A one-time sync must never resume API requests after an application restart.
     this.db.prepare('UPDATE schedule_settings SET enabled=0,stop_when_idle=0 WHERE enabled<>0 OR stop_when_idle<>0').run();
     this.db.prepare("UPDATE schedule_daily_jobs SET status='pending',attempts=max(0,attempts-1) WHERE status='running'").run();
+    this.db.prepare("UPDATE schedule_jobs SET status='pending',attempts=max(0,attempts-1),available_at=0 WHERE status='running'").run();
   }
 
-  settings(accountId: string): { enabled: boolean; concurrency: number; stopWhenIdle: boolean; since: number } {
-    const row = this.db.prepare('SELECT enabled,concurrency,stop_when_idle,since FROM schedule_settings WHERE account_id=?').get(accountId);
+  settings(accountId: string): { enabled: boolean; concurrency: number; stopWhenIdle: boolean; since: number;
+    lastSyncedAt: number; groupLastSyncedAt: Record<string, number> } {
+    const row = this.db.prepare('SELECT enabled,concurrency,stop_when_idle,since,last_synced_at FROM schedule_settings WHERE account_id=?').get(accountId);
+    const groupLastSyncedAt = Object.fromEntries(this.db.prepare('SELECT group_id,last_synced_at FROM schedule_group_sync WHERE account_id=?')
+      .all(accountId).map(group => [String(group.group_id), Number(group.last_synced_at)]));
     return {
       enabled: Boolean(row?.enabled), concurrency: Number(row?.concurrency ?? 3),
       stopWhenIdle: Boolean(row?.stop_when_idle), since: Number(row?.since ?? 0),
+      lastSyncedAt: Number(row?.last_synced_at ?? 0), groupLastSyncedAt,
     };
   }
 
-  configure(accountId: string, value: { enabled: boolean; concurrency: number; stopWhenIdle?: boolean; since?: number }) {
-    const since = value.since ?? this.settings(accountId).since;
-    this.db.prepare(`INSERT INTO schedule_settings(account_id,enabled,concurrency,stop_when_idle,since) VALUES(?,?,?,?,?)
-      ON CONFLICT(account_id) DO UPDATE SET enabled=excluded.enabled,concurrency=excluded.concurrency,
-      stop_when_idle=excluded.stop_when_idle,since=excluded.since`)
-      .run(accountId, Number(value.enabled), value.concurrency, Number(Boolean(value.enabled && value.stopWhenIdle)), since);
+  configure(accountId: string, value: { enabled: boolean; concurrency: number; stopWhenIdle?: boolean; since?: number;
+    syncedThrough?: number; syncedGroupIds?: string[] }) {
+    const current = this.settings(accountId);
+    const since = value.since ?? current.since;
+    const lastSyncedAt = Math.max(current.lastSyncedAt, value.syncedThrough ?? 0);
+    this.transaction(() => {
+      this.db.prepare(`INSERT INTO schedule_settings(account_id,enabled,concurrency,stop_when_idle,since,last_synced_at) VALUES(?,?,?,?,?,?)
+        ON CONFLICT(account_id) DO UPDATE SET enabled=excluded.enabled,concurrency=excluded.concurrency,
+        stop_when_idle=excluded.stop_when_idle,since=excluded.since,last_synced_at=max(schedule_settings.last_synced_at,excluded.last_synced_at)`)
+        .run(accountId, Number(value.enabled), value.concurrency, Number(Boolean(value.enabled && value.stopWhenIdle)), since, lastSyncedAt);
+      if (value.syncedThrough) for (const groupId of new Set(value.syncedGroupIds ?? [])) {
+        this.db.prepare(`INSERT INTO schedule_group_sync(account_id,group_id,last_synced_at) VALUES(?,?,?)
+          ON CONFLICT(account_id,group_id) DO UPDATE SET last_synced_at=max(schedule_group_sync.last_synced_at,excluded.last_synced_at)`)
+          .run(accountId, groupId, value.syncedThrough);
+      }
+    });
   }
 
   stopWhenIdle(accountId: string): boolean {
@@ -122,35 +145,70 @@ export class DailyScheduleStore {
     }))).digest('hex');
   }
 
+  private rowsWithStatus(accountId: string, day: string, status: ProcessingMessageState): MessageRow[] {
+    const [start, end] = dayRange(day);
+    return this.db.prepare(`SELECT m.key,m.content_hash,m.payload,m.time,g.name FROM messages m
+      JOIN groups g ON g.account_id=m.account_id AND g.id=m.group_id
+      JOIN schedule_jobs j ON j.message_key=m.key AND j.input_hash=m.content_hash
+      WHERE m.account_id=? AND g.followed=1 AND m.time>=? AND m.time<? AND m.time>=? AND j.status=?
+      ORDER BY m.time,m.key`).all(accountId, start, end, this.settings(accountId).since, status) as unknown as MessageRow[];
+  }
+
+  private currentRows(job: DailyProcessingJob): MessageRow[] {
+    const keys = new Set(job.messages.map(source => source.message.key));
+    return this.rows(job.accountId, job.sourceDay).filter(row => keys.has(String(row.key)));
+  }
+
+  private enqueueCandidates(accountId: string): MessageRow[] {
+    return this.db.prepare(`SELECT m.key,m.content_hash,m.payload,m.time,g.name FROM messages m
+      JOIN groups g ON g.account_id=m.account_id AND g.id=m.group_id
+      LEFT JOIN schedule_jobs j ON j.message_key=m.key
+      WHERE m.account_id=? AND g.followed=1 AND m.time>=?
+        AND (j.message_key IS NULL OR j.input_hash<>m.content_hash OR j.status IN ('pending','running')
+          OR instr(m.text,'[引用]')>0 OR instr(m.text,'[CQ:reply,')>0)
+      ORDER BY m.time,m.key`).all(accountId, this.settings(accountId).since) as unknown as MessageRow[];
+  }
+
   enqueue(accountId: string) {
-    const byDay = new Map<string, MessageRow[]>();
-    for (const row of this.rows(accountId)) {
-      const day = beijingSourceDay(Number(row.time));
-      const values = byDay.get(day) ?? [];
-      values.push(row);
-      byDay.set(day, values);
-    }
+    const rows = this.enqueueCandidates(accountId);
     const now = Date.now();
     this.transaction(() => {
-      for (const [day, rows] of byDay) {
-        const hash = this.hashRows(rows);
+      for (const row of rows) {
+        const message = JSON.parse(String(row.payload)) as Message;
+        const referencesHash = readReferenceGraph(this.db, message).hash;
+        this.db.prepare(`INSERT INTO schedule_jobs(message_key,input_hash,status,updated_at,processing_version,references_hash)
+          VALUES(?,?,'pending',?,?,?) ON CONFLICT(message_key) DO UPDATE SET input_hash=excluded.input_hash,status='pending',attempts=0,
+          available_at=0,error='',updated_at=excluded.updated_at,processing_version=excluded.processing_version,references_hash=excluded.references_hash
+          WHERE schedule_jobs.status<>'running' AND (schedule_jobs.input_hash<>excluded.input_hash OR schedule_jobs.references_hash<>excluded.references_hash)`)
+          .run(row.key, row.content_hash, now, scheduleProcessingVersion, referencesHash);
+      }
+      const pendingByDay = new Map<string, MessageRow[]>();
+      for (const row of rows) {
+        const state = this.db.prepare('SELECT status,input_hash FROM schedule_jobs WHERE message_key=?').get(row.key);
+        if (state?.status !== 'pending' || state.input_hash !== row.content_hash) continue;
+        const day = beijingSourceDay(Number(row.time));
+        const values = pendingByDay.get(day) ?? [];
+        values.push(row);
+        pendingByDay.set(day, values);
+      }
+      for (const [day, pendingRows] of pendingByDay) {
+        const current = this.db.prepare('SELECT status,input_hash FROM schedule_daily_jobs WHERE account_id=? AND source_day=?').get(accountId, day);
+        if (current?.status === 'running') continue;
+        const hash = this.hashRows(pendingRows);
         this.db.prepare(`INSERT INTO schedule_daily_jobs(account_id,source_day,input_hash,status,updated_at,processing_version)
           VALUES(?,?,?,'pending',?,?) ON CONFLICT(account_id,source_day) DO UPDATE SET
-          input_hash=excluded.input_hash,status='pending',attempts=0,available_at=0,error='',diagnostics='[]',updated_at=excluded.updated_at,
-          processing_version=excluded.processing_version,output_json='[]'
-          WHERE schedule_daily_jobs.input_hash<>excluded.input_hash
-            OR (schedule_daily_jobs.processing_version<excluded.processing_version AND schedule_daily_jobs.status IN ('partial','failed'))`)
+          input_hash=excluded.input_hash,status='pending',
+          attempts=CASE WHEN schedule_daily_jobs.status='pending' AND schedule_daily_jobs.input_hash=excluded.input_hash
+            THEN schedule_daily_jobs.attempts ELSE 0 END,
+          available_at=CASE WHEN schedule_daily_jobs.status='pending' AND schedule_daily_jobs.input_hash=excluded.input_hash
+            THEN schedule_daily_jobs.available_at ELSE 0 END,
+          error='',diagnostics='[]',updated_at=excluded.updated_at,processing_version=excluded.processing_version
+          WHERE schedule_daily_jobs.status<>'running'`)
           .run(accountId, day, hash, now, scheduleProcessingVersion);
-        for (const row of rows) this.db.prepare(`INSERT INTO schedule_jobs(message_key,input_hash,status,updated_at,processing_version)
-          VALUES(?,?,'pending',?,?) ON CONFLICT(message_key) DO UPDATE SET input_hash=excluded.input_hash,status='pending',attempts=0,
-          available_at=0,error='',updated_at=excluded.updated_at,processing_version=excluded.processing_version
-          WHERE schedule_jobs.input_hash<>excluded.input_hash`).run(row.key, row.content_hash, now, scheduleProcessingVersion);
       }
-      const activeDays = [...byDay.keys()];
-      if (activeDays.length) {
-        this.db.prepare(`DELETE FROM schedule_daily_jobs WHERE account_id=? AND source_day NOT IN (${activeDays.map(() => '?').join(',')})`)
-          .run(accountId, ...activeDays);
-      } else this.db.prepare('DELETE FROM schedule_daily_jobs WHERE account_id=?').run(accountId);
+      const activeDays = [...pendingByDay.keys()];
+      const suffix = activeDays.length ? `AND source_day NOT IN (${activeDays.map(() => '?').join(',')})` : '';
+      this.db.prepare(`DELETE FROM schedule_daily_jobs WHERE account_id=? AND status='pending' ${suffix}`).run(accountId, ...activeDays);
     });
   }
 
@@ -160,11 +218,16 @@ export class DailyScheduleStore {
         ORDER BY source_day LIMIT 1`).get(accountId, now);
       if (!row) return;
       const sourceDay = String(row.source_day);
-      const rows = this.rows(accountId, sourceDay);
+      const rows = this.rowsWithStatus(accountId, sourceDay, 'pending');
       if (!rows.length || this.hashRows(rows) !== String(row.input_hash)) return;
       const updated = this.db.prepare(`UPDATE schedule_daily_jobs SET status='running',attempts=attempts+1,updated_at=?,processing_version=?
         WHERE account_id=? AND source_day=? AND status='pending'`).run(now, scheduleProcessingVersion, accountId, sourceDay);
       if (!updated.changes) return;
+      for (const item of rows) {
+        const leased = this.db.prepare(`UPDATE schedule_jobs SET status='running',attempts=attempts+1,updated_at=?
+          WHERE message_key=? AND input_hash=? AND status='pending'`).run(now, item.key, item.content_hash);
+        if (!leased.changes) throw new Error('消息整理状态已变化，请重新领取。');
+      }
       const messages: DailyMessageSource[] = rows.map((item, index) => {
         const message = JSON.parse(String(item.payload)) as Message;
         return {
@@ -183,14 +246,21 @@ export class DailyScheduleStore {
   isCurrent(job: DailyProcessingJob): boolean {
     const row = this.db.prepare(`SELECT input_hash,status FROM schedule_daily_jobs WHERE account_id=? AND source_day=?`)
       .get(job.accountId, job.sourceDay);
-    return Boolean(row && row.status === 'running' && row.input_hash === job.hash && this.hashRows(this.rows(job.accountId, job.sourceDay)) === job.hash);
+    if (!row || row.status !== 'running' || row.input_hash !== job.hash) return false;
+    const rows = this.currentRows(job);
+    if (rows.length !== job.messages.length || this.hashRows(rows) !== job.hash) return false;
+    return job.messages.every(source => {
+      const state = this.db.prepare('SELECT status,input_hash FROM schedule_jobs WHERE message_key=?').get(source.message.key);
+      return state?.status === 'running' && state.input_hash === source.contentHash;
+    });
   }
 
   refreshReferences(job: DailyProcessingJob): boolean {
     const row = this.db.prepare(`SELECT input_hash,status FROM schedule_daily_jobs WHERE account_id=? AND source_day=?`)
       .get(job.accountId, job.sourceDay);
     if (!row || row.status !== 'running' || row.input_hash !== job.hash) return false;
-    const rows = this.rows(job.accountId, job.sourceDay);
+    const rows = this.currentRows(job);
+    if (rows.length !== job.messages.length) return false;
     const hash = this.hashRows(rows);
     const byKey = new Map(job.messages.map(source => [source.message.key, source]));
     for (const item of rows) {
@@ -199,13 +269,22 @@ export class DailyScheduleStore {
     }
     this.db.prepare(`UPDATE schedule_daily_jobs SET input_hash=? WHERE account_id=? AND source_day=? AND input_hash=? AND status='running'`)
       .run(hash, job.accountId, job.sourceDay, job.hash);
+    for (const item of rows) {
+      const message = JSON.parse(String(item.payload)) as Message;
+      this.db.prepare(`UPDATE schedule_jobs SET references_hash=? WHERE message_key=? AND status='running'`)
+        .run(readReferenceGraph(this.db, message).hash, item.key);
+    }
     job.hash = hash;
     return true;
   }
 
   release(job: DailyProcessingJob) {
-    this.db.prepare(`UPDATE schedule_daily_jobs SET status='pending',attempts=max(0,attempts-1),available_at=0
-      WHERE account_id=? AND source_day=? AND input_hash=? AND status='running'`).run(job.accountId, job.sourceDay, job.hash);
+    this.transaction(() => {
+      this.db.prepare(`UPDATE schedule_daily_jobs SET status='pending',attempts=max(0,attempts-1),available_at=0
+        WHERE account_id=? AND source_day=? AND input_hash=? AND status='running'`).run(job.accountId, job.sourceDay, job.hash);
+      for (const source of job.messages) this.db.prepare(`UPDATE schedule_jobs SET status='pending',attempts=max(0,attempts-1),available_at=0
+        WHERE message_key=? AND input_hash=? AND status='running'`).run(source.message.key, source.contentHash);
+    });
   }
 
   fail(job: DailyProcessingJob, error: string, now = Date.now()) {
@@ -214,8 +293,9 @@ export class DailyScheduleStore {
       const updated = this.db.prepare(`UPDATE schedule_daily_jobs SET status=?,error=?,available_at=?,updated_at=?
         WHERE account_id=? AND source_day=? AND input_hash=? AND status='running'`)
         .run(status, error.slice(0, 800), now + 5000 * 2 ** (job.attempts - 1), now, job.accountId, job.sourceDay, job.hash);
-      if (updated.changes) for (const source of job.messages) this.db.prepare(`UPDATE schedule_jobs SET status=?,error=?,updated_at=? WHERE message_key=?`)
-        .run(status, error.slice(0, 800), now, source.message.key);
+      if (updated.changes) for (const source of job.messages) this.db.prepare(`UPDATE schedule_jobs SET status=?,error=?,available_at=?,updated_at=?
+        WHERE message_key=? AND input_hash=? AND status='running'`)
+        .run(status, error.slice(0, 800), now + 5000 * 2 ** (job.attempts - 1), now, source.message.key, source.contentHash);
     });
   }
 
@@ -223,7 +303,8 @@ export class DailyScheduleStore {
     let day: string | undefined;
     if (messageKey) {
       const row = this.db.prepare('SELECT time FROM messages WHERE account_id=? AND key=?').get(accountId, messageKey);
-      if (row) day = beijingSourceDay(Number(row.time));
+      if (!row) throw new Error('需要重新处理的消息已不存在或不属于当前账号。');
+      day = beijingSourceDay(Number(row.time));
     }
     this.transaction(() => {
       this.db.prepare(`UPDATE schedule_daily_jobs SET status='pending',attempts=0,error='',available_at=0
@@ -249,7 +330,7 @@ export class DailyScheduleStore {
   private matchingActivity(accountId: string, activity: ActivityInput): { id: string; activity: ActivityInput } | undefined {
     const rows = activity.startDate
       ? this.db.prepare('SELECT id FROM activities WHERE account_id=? AND (start_date=? OR start_date IS NULL)').all(accountId, activity.startDate)
-      : this.db.prepare('SELECT id FROM activities WHERE account_id=? AND start_date IS NULL').all(accountId);
+      : this.db.prepare('SELECT id FROM activities WHERE account_id=?').all(accountId);
     for (const row of rows) {
       const existing = this.canonical(String(row.id));
       if (existing && sameRecruitingEvent(existing, activity)) return { id: String(row.id), activity: existing };
@@ -267,9 +348,7 @@ export class DailyScheduleStore {
     });
     return this.transaction(() => {
       if (!this.isCurrent(job)) return false;
-      const [start, end] = dayRange(job.sourceDay);
-      const dayKeys = this.db.prepare('SELECT key FROM messages WHERE account_id=? AND time>=? AND time<?').all(job.accountId, start, end);
-      for (const row of dayKeys) this.db.prepare('DELETE FROM activity_sources WHERE message_key=?').run(row.key);
+      for (const source of job.messages) this.db.prepare('DELETE FROM activity_sources WHERE message_key=?').run(source.message.key);
       for (const item of activities) {
         const matched = this.matchingActivity(job.accountId, item.activity);
         const id = matched?.id ?? activityIdentity(job.accountId, item.activity);
@@ -303,9 +382,9 @@ export class DailyScheduleStore {
         const sourceWarnings = sources.get(source.ref)?.warnings ?? [];
         const sourceReviewReasons = severeWarnings(sourceWarnings);
         const sourceStatus = sourceReviewReasons.length ? 'partial' : 'completed';
-        this.db.prepare(`UPDATE schedule_jobs SET status=?,error=?,diagnostics=?,processing_version=?,updated_at=?
+        this.db.prepare(`UPDATE schedule_jobs SET status=?,error=?,diagnostics=?,references_hash=?,processing_version=?,updated_at=?
           WHERE message_key=? AND input_hash=?`).run(sourceStatus, sourceReviewReasons.join('；').slice(0, 800),
-          JSON.stringify(sourceWarnings), scheduleProcessingVersion, Date.now(), source.message.key, source.contentHash);
+          JSON.stringify(sourceWarnings), source.referenceGraph?.hash ?? '', scheduleProcessingVersion, Date.now(), source.message.key, source.contentHash);
         this.db.prepare('DELETE FROM recruiting_information WHERE message_key=?').run(source.message.key);
       }
       return true;
@@ -314,39 +393,46 @@ export class DailyScheduleStore {
 
   status(accountId: string): ProcessingStatus {
     const status: ProcessingStatus = { ...emptyProcessingStatus, ...this.settings(accountId), issues: [] };
-    for (const row of this.db.prepare(`SELECT status,count(*) AS n FROM schedule_daily_jobs WHERE account_id=? GROUP BY status`).all(accountId)) {
-      if (['pending', 'running', 'completed', 'partial', 'failed'].includes(String(row.status))) status[row.status as 'pending'] = Number(row.n);
+    const hasArchive = Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'").get());
+    if (!hasArchive) return status;
+    const dayStatuses = this.db.prepare(`SELECT date(m.time,'unixepoch','+8 hours') AS source_day,
+      CASE WHEN sum(j.status='running')>0 THEN 'running' WHEN sum(j.status='pending')>0 THEN 'pending'
+        WHEN sum(j.status='failed')>0 THEN 'failed' WHEN sum(j.status='partial')>0 THEN 'partial' ELSE 'completed' END AS status
+      FROM schedule_jobs j JOIN messages m ON m.key=j.message_key
+      JOIN groups g ON g.account_id=m.account_id AND g.id=m.group_id
+      WHERE m.account_id=? AND g.followed=1 AND m.time>=? AND j.input_hash=m.content_hash GROUP BY source_day`)
+      .all(accountId, this.settings(accountId).since);
+    for (const row of dayStatuses) {
+      if (['pending', 'running', 'completed', 'partial', 'failed'].includes(String(row.status))) status[row.status as 'pending']++;
     }
-    const issues = this.db.prepare(`SELECT source_day,status,error FROM schedule_daily_jobs
-      WHERE account_id=? AND status IN ('partial','failed') ORDER BY updated_at DESC LIMIT 30`).all(accountId);
-    status.issues = issues.flatMap(issue => {
-      const source = this.rows(accountId, String(issue.source_day))[0];
-      if (!source) return [];
-      const message: Message = JSON.parse(String(source.payload));
-      return [{ messageKey: message.key, status: issue.status as 'failed' | 'partial', groupName: String(source.name),
-        text: message.text.slice(0, 200), error: String(issue.error) }];
-    });
+    const issues = this.db.prepare(`SELECT j.message_key,j.status,j.error,g.name,m.text FROM schedule_jobs j
+      JOIN messages m ON m.key=j.message_key JOIN groups g ON g.account_id=m.account_id AND g.id=m.group_id
+      WHERE m.account_id=? AND g.followed=1 AND m.time>=? AND j.input_hash=m.content_hash
+        AND j.status IN ('partial','failed') ORDER BY j.updated_at DESC LIMIT 30`).all(accountId, this.settings(accountId).since);
+    status.issues = issues.map(issue => ({ messageKey: String(issue.message_key), status: issue.status as 'failed' | 'partial',
+      groupName: String(issue.name), text: String(issue.text).slice(0, 200), error: String(issue.error) }));
     return status;
   }
 
   details(accountId: string, query: ProcessingDetailsQuery): ProcessingDetailsPage {
-    const effectiveStatus = "CASE WHEN d.status IN ('pending','running','failed') THEN d.status ELSE coalesce(j.status,d.status,'pending') END";
+    const effectiveStatus = "CASE WHEN j.message_key IS NULL OR j.input_hash<>m.content_hash THEN 'pending' ELSE j.status END";
     const bucketSql: Record<ProcessingMessageBucket, string> = {
-      pending: `${effectiveStatus} IN ('pending','failed')`,
+      pending: `${effectiveStatus}='pending'`,
       running: `${effectiveStatus}='running'`,
-      completed: `${effectiveStatus} IN ('completed','partial')`,
+      completed: `${effectiveStatus}='completed'`,
+      review: `${effectiveStatus} IN ('partial','failed')`,
     };
     const base = `FROM messages m JOIN groups g ON g.account_id=m.account_id AND g.id=m.group_id
       LEFT JOIN schedule_jobs j ON j.message_key=m.key
-      LEFT JOIN schedule_daily_jobs d ON d.account_id=m.account_id AND d.source_day=date(m.time,'unixepoch','+8 hours')
       WHERE m.account_id=? AND g.followed=1 AND m.time>=?`;
     const count = (bucket: ProcessingMessageBucket) => Number(this.db.prepare(`SELECT count(*) AS n ${base} AND ${bucketSql[bucket]}`)
       .get(accountId, query.since)?.n ?? 0);
-    const counts = { pending: count('pending'), running: count('running'), completed: count('completed') };
+    const counts = { pending: count('pending'), running: count('running'), completed: count('completed'), review: count('review') };
     const offset = query.offset ?? 0;
     const limit = query.limit ?? 100;
     const rows = this.db.prepare(`SELECT m.key,m.time,m.text,m.payload,g.name,
-      ${effectiveStatus} AS status,CASE WHEN ${effectiveStatus}='failed' THEN coalesce(d.error,j.error,'') ELSE coalesce(j.error,'') END AS error,
+      ${effectiveStatus} AS status,CASE WHEN ${effectiveStatus} IN ('failed','partial')
+        THEN coalesce(nullif(j.error,''),'') ELSE '' END AS error,
       coalesce((SELECT json_group_array(json_extract(c.payload,'$.title'))
         FROM activity_sources s JOIN activity_canonical c ON c.activity_id=s.activity_id WHERE s.message_key=m.key),'[]') AS activity_titles
       ${base} AND ${bucketSql[query.bucket]} ORDER BY m.time DESC,m.key DESC LIMIT ? OFFSET ?`)

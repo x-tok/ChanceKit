@@ -34,8 +34,8 @@ test('today-centered calendar selects dates and renders structured times and rea
   sources[activities[2].id][0].relatedMessages = [{
     messageKey: 'quoted', text: '请留意这场招聘会的时间补充。', senderName: '就业指导老师', messageTime: 1789900000, relation: 'quoted',
   }];
-  const state: AppState = { phase: 'idle', detail: '', runtime: null, historyBusy: false, archived: 4, logs: [],
-    localAccount: { id: 'test', nickname: '测试账号' },
+  const state: AppState = { phase: 'online', detail: '已连接', runtime: 'managed', historyBusy: false, archived: 4, logs: [],
+    account: { id: 'test', nickname: '测试账号' }, localAccount: { id: 'test', nickname: '测试账号' },
     groups: [{ id: 'test-group', name: '校园招聘信息交流群', followed: true, messageCount: 4, memberCount: 168, maxMembers: 500 }] };
   try {
     await page.addInitScript(({ state, activities, sources, status, details, information }) => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, ArrowRight, CalendarDays, CalendarRange, ChevronRight, Clock3, CloudDownload, ExternalLink, LoaderCircle, MapPin, MessageCircle, RefreshCw, Search, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, CalendarDays, CalendarRange, ChevronRight, Clock3, CloudDownload, ExternalLink, LoaderCircle, MapPin, MessageCircle, RefreshCw, Search, Settings2, X } from 'lucide-react';
 import { bridge, isDesktop } from './bridge';
 import { activityOnDate, activityTimeLabel, activityTypes, addDays, calendarWindowStart, chinaToday, emptyProcessingStatus, isOngoingActivity, scheduleProcessingVersion, type Activity, type ActivityDetail, type ActivityType, type ProcessingStatus, type SchedulePage } from './schedule';
 import type { AppState } from './shared';
@@ -7,7 +7,7 @@ import s from './Schedule.module.css';
 import common from './App.module.css';
 import { SourceMaterials } from './SourceMaterials';
 import { CalendarMessage } from './CalendarMessage';
-import { initialSyncWindow, runInitialSync, type InitialSyncProgress } from './onboarding/initial-sync';
+import { historySyncStart, initialSyncWindow, runInitialSync, type InitialSyncProgress } from './onboarding/initial-sync';
 import { SyncDialog } from './schedule-sync/SyncDialog';
 
 const weekday = (day: string) => ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date(`${day}T00:00:00Z`).getUTCDay()];
@@ -45,12 +45,12 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
     (a.startTime ?? '99:99').localeCompare(b.startTime ?? '99:99') || a.title.localeCompare(b.title, 'zh-CN'));
   const ongoing = page.activities.filter(isOngoingActivity).sort((a, b) =>
     a.endDate!.localeCompare(b.endDate!) || a.startDate!.localeCompare(b.startDate!) || a.title.localeCompare(b.title, 'zh-CN'));
-  const groups = state.groups.filter(group => group.followed);
-  const accountId = state.localAccount?.id;
+  const online = state.phase === 'online' && Boolean(state.account);
+  const groups = online ? state.groups.filter(group => group.followed) : [];
+  const accountId = online ? state.account?.id : undefined;
   const readingMessages = Boolean(syncProgress);
   const organizing = status.enabled || status.running > 0;
-  const queueTotal = status.pending + status.running + status.completed + status.partial + status.failed;
-  const syncSettled = !readingMessages && !organizing && queueTotal > 0 && status.pending === 0;
+  const hasSynced = Boolean(status.lastSyncedAt);
   const syncSince = status.since || initialSyncWindow().since;
   const refresh = useCallback(() => setRevision(value => value + 1), []);
   const jumpTo = (day: string) => { setAnchor(day); setSelectedDate(day); };
@@ -63,7 +63,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
     if (event.type === 'schedule' || event.type === 'messages') refresh();
   }), [refresh]);
   useEffect(() => {
-    setGroupId(''); setPage(emptyPage); setSelected(null); setDetailId(''); detail.current?.close(); detailNumber.current++;
+    setGroupId(''); setPage(emptyPage); setStatus(emptyProcessingStatus); setSelected(null); setDetailId(''); detail.current?.close(); detailNumber.current++;
     syncController.current?.abort(); setSyncProgress(undefined); setSyncOpen(false); setSyncError('');
   }, [accountId]);
   useEffect(() => {
@@ -71,6 +71,10 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   }, [state.groups, groupId]);
   useEffect(() => {
     const ticket = ++requestNumber.current;
+    if (!online || !accountId) {
+      setPage(emptyPage); setStatus(emptyProcessingStatus); setLoading(false); setError('');
+      return;
+    }
     setLoading(true);
     setPage(emptyPage);
     const timer = setTimeout(() => {
@@ -84,7 +88,7 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
         .finally(() => { if (ticket === requestNumber.current) setLoading(false); });
     }, search ? 200 : 50);
     return () => { clearTimeout(timer); requestNumber.current++; };
-  }, [week, type, groupId, search, accountId, revision, state.groups]);
+  }, [week, type, groupId, search, accountId, online, revision, state.groups]);
   useEffect(() => () => { detailNumber.current++; syncController.current?.abort(); }, []);
   const action = async (operation: () => Promise<unknown>) => {
     setBusy(true); setError('');
@@ -93,16 +97,20 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
   };
   const startSync = async () => {
     if (!state.account || state.phase !== 'online') { setSyncError('请先在设置中登录 QQ，再开始同步。'); return; }
+    const expectedAccountId = state.account.id;
     const controller = new AbortController();
     syncController.current?.abort(); syncController.current = controller;
     setBusy(true); setSyncError('');
     setSyncProgress({ completed: 0, total: groups.length, group: '', added: 0 });
     try {
       const window = initialSyncWindow();
-      await runInitialSync(state, window.since, bridge, setSyncProgress, controller.signal);
+      const syncStartedAt = Math.floor(Date.now() / 1000);
+      await runInitialSync(state, groupId => historySyncStart(status.groupLastSyncedAt?.[groupId]), bridge, setSyncProgress, controller.signal);
       controller.signal.throwIfAborted();
       setSyncProgress(undefined);
-      setStatus(await bridge.configureProcessing({ enabled: true, concurrency: 3, stopWhenIdle: true, since: window.since }));
+      setStatus(await bridge.configureProcessing({ enabled: true, concurrency: 3, stopWhenIdle: true,
+        since: status.since || window.since, syncedThrough: syncStartedAt,
+        syncedGroupIds: groups.map(group => group.id), expectedAccountId }));
       refresh();
     } catch (error) {
       if (!controller.signal.aborted) setSyncError(errorText(error));
@@ -119,11 +127,14 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
     } catch (error) { setSyncError(errorText(error)); }
     finally { setBusy(false); }
   };
-  const retrySync = async () => {
+  const retrySync = async (messageKeys: string[]) => {
+    if (!messageKeys.length) return;
+    const expectedAccountId = state.account?.id;
+    if (!expectedAccountId) { setSyncError('请先登录 QQ，再重试消息。'); return; }
     setBusy(true); setSyncError('');
     try {
-      await bridge.retryProcessing();
-      setStatus(await bridge.configureProcessing({ enabled: true, concurrency: 3, stopWhenIdle: true, since: syncSince }));
+      for (const key of new Set(messageKeys)) await bridge.retryProcessing(key);
+      setStatus(await bridge.configureProcessing({ enabled: true, concurrency: 3, stopWhenIdle: true, since: syncSince, expectedAccountId }));
       refresh();
     } catch (error) { setSyncError(errorText(error)); }
     finally { setBusy(false); }
@@ -139,6 +150,14 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
     finally { if (ticket === detailNumber.current) setDetailBusy(false); }
   };
   const openLink = (url: string) => void action(() => bridge.openExternal(url));
+  const syncUnavailableReason = !isDesktop
+    ? '桌面版才能同步群聊消息。'
+    : !online
+      ? '请先在设置中登录 QQ，再开始同步。'
+      : groups.length === 0
+        ? '请先在群消息中关注至少一个群聊。'
+        : '';
+  const startDisabledReason = syncUnavailableReason || (busy ? '当前操作尚未完成，请稍候。' : '');
   const activityButton = (activity: Activity) => <button key={activity.id} className={s.activity} onClick={() => void openDetail(activity)} aria-label={`查看活动：${activity.title}`}>
     <span className={s.activityTop}><span className={s.kind} data-kind={activity.type}>{activity.type}</span>{activity.needsReview && <AlertCircle size={13} aria-label="待核对" />}</span>
     <strong>{activity.title}</strong>
@@ -147,13 +166,25 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
     <small>{activity.organizer || activity.groupNames[0]}{activity.sourceCount > 1 && ` · ${activity.sourceCount} 条来源`}</small>
   </button>;
 
+  if (!online) return <section className={`${s.page} ${s.loginRequiredPage}`} aria-label="日程">
+    <div className={s.loginRequired}>
+      <div className={s.loginRequiredMark}><CalendarDays size={34} strokeWidth={1.3} /></div>
+      <h1>请先登录 QQ</h1>
+      <p>登录后查看群聊消息整理出的日程。</p>
+      <button className={common.primaryButton} onClick={onModels}><Settings2 size={16} />前往设置</button>
+    </div>
+  </section>;
+
   return <section className={s.page} aria-label="日程">
     <div className={s.scroll}>
       <header className={s.heading}><div><span>活动与机会</span><h1>日程</h1></div>
-        <button className={common.primaryButton} disabled={!isDesktop || !accountId || !groups.length} onClick={() => setSyncOpen(true)}>
-          {readingMessages || organizing ? <LoaderCircle size={15} className={common.spin} /> : <CloudDownload size={15} />}
-          {readingMessages || organizing ? '查看同步进度' : syncSettled ? '再次同步' : '开始同步'}
-        </button>
+        <span className={s.syncAction} tabIndex={syncUnavailableReason ? 0 : undefined}>
+          <button className={common.primaryButton} disabled={Boolean(syncUnavailableReason)} onClick={() => setSyncOpen(true)} aria-describedby={syncUnavailableReason ? 'schedule-sync-unavailable' : undefined}>
+            {readingMessages || organizing ? <LoaderCircle size={15} className={common.spin} /> : <CloudDownload size={15} />}
+            {readingMessages || organizing ? '查看同步进度' : hasSynced ? '同步新增消息' : '开始同步'}
+          </button>
+          {syncUnavailableReason && <span id="schedule-sync-unavailable" className={s.actionTooltip} role="tooltip">{syncUnavailableReason}</span>}
+        </span>
       </header>
       <div className={s.calendarToolbar}>
         <div className={s.weekNavigation}>
@@ -227,8 +258,8 @@ export function Schedule({ state, onModels, onGroup }: { state: AppState; onMode
     </div>
     <SyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} status={status} progress={syncProgress}
       since={syncSince} groups={groups.length} busy={busy} error={syncError} revision={revision}
-      canStart={isDesktop && Boolean(accountId) && groups.length > 0 && state.phase === 'online'}
-      onStart={() => void startSync()} onStop={() => void stopSync()} onRetry={() => void retrySync()}
+      startDisabledReason={startDisabledReason}
+      onStart={() => void startSync()} onStop={() => void stopSync()} onRetry={keys => void retrySync(keys)}
       onModels={() => { setSyncOpen(false); onModels(); }} outdated={isDesktop && !loading && (status.processorVersion ?? 0) < scheduleProcessingVersion} />
     <dialog ref={detail} className={`${s.dialog} ${s.detail}`} onClick={event => { if (event.target === detail.current) detail.current?.close(); }}
       onClose={() => { detailNumber.current++; setDetailId(''); }}>

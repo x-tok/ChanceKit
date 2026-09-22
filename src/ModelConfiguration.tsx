@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Activity, AlertCircle, Bot, Check, Circle, Eye, EyeOff, KeyRound, LoaderCircle, RotateCcw, Save, Server, ShieldCheck, SlidersHorizontal, Square, Trash2, Zap } from 'lucide-react';
 import { bridge, isDesktop } from './bridge';
-import { configForProvider, defaultModelConfig, isLocalModelEndpoint, modelProviderPresets, sameCredentialScope, type ModelConfig, type ModelConfigInput, type ModelProviderEntry, type ModelSettings, type ModelTestResult, type ReasoningLevel } from './model-config';
+import { configForProvider, defaultModelConfig, isLocalModelEndpoint, modelProviderPresets, recommendedMaxOutputTokens, sameCredentialScope, type ModelConfig, type ModelConfigInput, type ModelProviderEntry, type ModelSettings, type ModelTestResult, type ReasoningLevel } from './model-config';
 import s from './ModelConfiguration.module.css';
 import common from './App.module.css';
 
@@ -73,7 +73,7 @@ export function ModelConfiguration({ active, embedded = false }: { active: boole
     if (!model) { update({ modelId }); return; }
     const changes: Partial<ModelConfig> = {
       modelId, api: model.api, contextWindow: model.contextWindow,
-      maxTokens: Math.min(4096, model.maxTokens, model.contextWindow),
+      maxTokens: Math.min(recommendedMaxOutputTokens, model.maxTokens, model.contextWindow),
       reasoning: model.reasoning, reasoningLevel: model.reasoningLevels?.[0] ?? 'off', imageInput: model.imageInput,
     };
     if (draft.baseUrl === provider?.baseUrl || provider?.models.some(entry => entry.baseUrl === draft.baseUrl)) changes.baseUrl = model.baseUrl;

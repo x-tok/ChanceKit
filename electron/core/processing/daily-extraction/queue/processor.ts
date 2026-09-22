@@ -58,8 +58,10 @@ export class DailyScheduleProcessor {
     return this.accountId ? this.store.details(this.accountId, query) : { ...emptyProcessingDetails, items: [] };
   }
 
-  async configure(value: { enabled: boolean; concurrency: number; stopWhenIdle?: boolean; since?: number }) {
+  async configure(value: { enabled: boolean; concurrency: number; stopWhenIdle?: boolean; since?: number; syncedThrough?: number;
+    syncedGroupIds?: string[]; expectedAccountId?: string }) {
     if (!this.accountId) throw new Error('请先连接 QQ 并关注群聊。');
+    if (value.expectedAccountId && value.expectedAccountId !== this.accountId) throw new Error('账号已切换，请重新开始同步。');
     const account = this.accountId;
     if (value.enabled) {
       const settings = await this.loadSettings();
@@ -122,6 +124,7 @@ export class DailyScheduleProcessor {
             else this.store.fail(job, error instanceof Error ? error.message : '当日消息处理失败。');
           } finally {
             this.running.delete(job.key);
+            this.store.enqueue(account);
             this.store.stopWhenIdle(account);
             if (!this.closed) { this.publish(); this.wake(); }
           }

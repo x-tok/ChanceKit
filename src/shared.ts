@@ -69,7 +69,8 @@ export interface DesktopBridge {
   informationDetail(messageKey: string): Promise<InformationDetail | null>;
   processingStatus(): Promise<ProcessingStatus>;
   processingDetails(query: ProcessingDetailsQuery): Promise<ProcessingDetailsPage>;
-  configureProcessing(value: { enabled: boolean; concurrency: number; stopWhenIdle?: boolean; since?: number }): Promise<ProcessingStatus>;
+  configureProcessing(value: { enabled: boolean; concurrency: number; stopWhenIdle?: boolean; since?: number; syncedThrough?: number;
+    syncedGroupIds?: string[]; expectedAccountId?: string }): Promise<ProcessingStatus>;
   retryProcessing(messageKey?: string): Promise<ProcessingStatus>;
   jobChatOverview(): Promise<JobChatOverview>;
   jobChatSession(sessionId: string): Promise<JobChatDetail | null>;

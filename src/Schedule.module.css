@@ -1,8 +1,17 @@
 .page { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.loginRequiredPage { align-items: center; justify-content: center; background: white; }
+.loginRequired { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; max-width: 420px; padding: 36px 24px; color: var(--muted); text-align: center; }
+.loginRequired h1 { color: var(--ink); font-size: 20px; font-weight: 500; }
+.loginRequired p { font-size: 13px; line-height: 1.7; }
+.loginRequiredMark { width: 74px; height: 74px; display: grid; place-items: center; margin-bottom: 3px; border-radius: 8px; color: #6b8876; background: var(--panel); }
 .scroll { flex: 1; overflow: auto; min-height: 0; padding: 28px 32px 32px; }
 .heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .heading > div > span { color: var(--muted); font-size: 12px; }
 .heading h1 { font-size: 26px; font-weight: 600; margin-top: 7px; }
+.syncAction { position: relative; display: inline-flex; flex-shrink: 0; border-radius: var(--radius); }
+.syncAction:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.actionTooltip { position: absolute; z-index: 4; top: calc(100% + 8px); right: 0; width: max-content; max-width: min(280px, calc(100vw - 40px)); padding: 7px 9px; border-radius: 5px; background: #263b2f; color: #f2f6f3; box-shadow: 0 4px 16px #17291f24; font-size: 11px; line-height: 1.6; pointer-events: none; opacity: 0; transform: translateY(-3px); transition: opacity 120ms ease, transform 120ms ease; }
+.syncAction:hover .actionTooltip, .syncAction:focus-visible .actionTooltip, .syncAction:focus-within .actionTooltip { opacity: 1; transform: translateY(0); }
 .groupCount { margin-left: auto; }
 .muted { color: var(--muted); font-size: 12px; line-height: 1.7; }
 .issues { list-style: none; margin: 0; padding: 0; max-height: 250px; overflow: auto; }

@@ -46,6 +46,7 @@ interface PiAgentOptions {
   signal?: AbortSignal;
   systemPrompt?: string;
   timeoutMs?: number;
+  samplingParams?: Record<string, unknown>;
   requireToolCall?: boolean;
   sessionId?: string;
   transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
@@ -92,6 +93,7 @@ export function createConfiguredPiAgent(settings: StoredModelSettings, options: 
         ? AbortSignal.any([options.signal, streamOptions.signal]) : options.signal ?? streamOptions?.signal,
       maxTokens: config.maxTokens,
       temperature: config.reasoning ? undefined : config.temperature,
+      samplingParams: options.samplingParams,
       ...(options.requireToolCall && context.tools?.length ? {
         // Provider adapters use different names for the same "call one of these tools" constraint.
         toolChoice: config.api === 'anthropic-messages' || config.api === 'google-generative-ai' ? 'any' : 'required',

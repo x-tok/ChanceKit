@@ -79,6 +79,8 @@ export interface ProcessingStatus {
   enabled: boolean;
   stopWhenIdle?: boolean;
   since?: number;
+  lastSyncedAt?: number;
+  groupLastSyncedAt?: Record<string, number>;
   concurrency: number;
   pending: number;
   running: number;
@@ -88,7 +90,7 @@ export interface ProcessingStatus {
   blockedReason?: string;
   issues: { messageKey: string; groupName: string; text: string; error: string; status: 'failed' | 'partial' }[];
 }
-export type ProcessingMessageBucket = 'pending' | 'running' | 'completed';
+export type ProcessingMessageBucket = 'pending' | 'running' | 'completed' | 'review';
 export type ProcessingMessageState = 'pending' | 'running' | 'completed' | 'partial' | 'failed';
 export interface ProcessingMessageItem {
   key: string;
@@ -117,12 +119,12 @@ export interface ProcessingDetailsPage {
   counts: Record<ProcessingMessageBucket, number>;
 }
 export const emptyProcessingDetails: ProcessingDetailsPage = {
-  items: [], total: 0, hasMore: false, counts: { pending: 0, running: 0, completed: 0 },
+  items: [], total: 0, hasMore: false, counts: { pending: 0, running: 0, completed: 0, review: 0 },
 };
-export const scheduleProcessingVersion = 3;
+export const scheduleProcessingVersion = 5;
 export const emptyProcessingStatus: ProcessingStatus = {
   processorVersion: scheduleProcessingVersion,
-  enabled: false, concurrency: 3, pending: 0, running: 0, completed: 0, partial: 0, failed: 0, issues: [],
+  enabled: false, concurrency: 3, groupLastSyncedAt: {}, pending: 0, running: 0, completed: 0, partial: 0, failed: 0, issues: [],
 };
 
 export function chinaToday(now = new Date()): string {

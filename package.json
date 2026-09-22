@@ -13,6 +13,7 @@
   "scripts": {
     "prepare:napcat": "node scripts/napcat-bundle.mjs --download",
     "prepare:electron": "node scripts/electron-runtime.mjs",
+    "clean:dev-data": "node scripts/clear-dev-data.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build && node scripts/build.mjs",

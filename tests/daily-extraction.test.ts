@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import { once } from 'node:events';
 import { Store, normalizeMessage } from '../electron/core/archive/store';
 import { ScheduleStore } from '../electron/core/processing/schedule-store';
@@ -11,7 +12,7 @@ import { DailyScheduleStore, beijingSourceDay } from '../electron/core/processin
 import { classifySourceLink } from '../electron/core/processing/daily-extraction/agent/link-classifier';
 import { buildDailyPromptPayload } from '../electron/core/processing/daily-extraction/agent/prompt';
 import { buildDailySources, humanMaterialText, humanMessageText } from '../electron/core/processing/daily-extraction/agent/source-builder';
-import { extractDailyActivities, parseDailyTextSubmission, splitDailySources } from '../electron/core/processing/daily-extraction/agent/run';
+import { dailyPromptCharBudget, extractDailyActivities, parseDailyTextSubmission, splitDailySources } from '../electron/core/processing/daily-extraction/agent/run';
 import { sameRecruitingEvent } from '../electron/core/processing/daily-extraction/dedupe';
 import { DailyScheduleProcessor } from '../electron/core/processing/daily-extraction/queue/processor';
 import { createReadSourceLinksTool } from '../electron/core/processing/daily-extraction/agent/tools/read-source-links';
@@ -42,7 +43,7 @@ async function fixture(t: TestContext) {
   messages.follow('a', '731234568', true);
   const schedule = new ScheduleStore(file);
   const daily = new DailyScheduleStore(file);
-  const value = { messages, schedule, daily, processor: undefined as DailyScheduleProcessor | undefined };
+  const value = { root, file, messages, schedule, daily, processor: undefined as DailyScheduleProcessor | undefined };
   t.after(async () => {
     if (value.processor) await value.processor.close(); else daily.close();
     schedule.close(); messages.close();
@@ -98,11 +99,61 @@ test('editing one message requeues only its day and stale daily leases cannot co
   messages.put([normalizeMessage({ ...sample(1, '第一天已更新'), time: first.time }, 'a')]);
   daily.enqueue('a');
   assert.equal(daily.complete(old, result(old)), false);
+  daily.release(old);
+  daily.enqueue('a');
   const replacement = daily.claim('a')!;
   assert.equal(replacement.sourceDay, old.sourceDay);
   daily.complete(replacement, result(replacement, []));
   const untouched = daily.claim('a')!;
   assert.equal(untouched.sourceDay, '2026-09-21');
+});
+
+test('a later same-day sync processes only new messages and deduplicates its activity', async t => {
+  const { messages, schedule, daily } = await fixture(t);
+  const time = Date.parse('2026-09-21T04:00:00Z') / 1000;
+  const original = normalizeMessage({ ...sample(1, '星河科技宣讲会通知'), time }, 'a');
+  messages.put([original]);
+  daily.enqueue('a');
+  const first = daily.claim('a')!;
+  assert.deepEqual(first.messages.map(source => source.message.key), [original.key]);
+  daily.complete(first, result(first, [{ ...activity, title: '星河科技校园宣讲会', sourceRefs: [1] }]));
+
+  daily.enqueue('a');
+  assert.equal(daily.claim('a'), undefined, 'completed messages keep their processed marker');
+
+  const repost = normalizeMessage({ ...sample(2, '再次转发：星河科技 2027 届秋季宣讲'), time: time + 60 }, 'a');
+  messages.put([repost]);
+  daily.enqueue('a');
+  const incremental = daily.claim('a')!;
+  assert.deepEqual(incremental.messages.map(source => source.message.key), [repost.key]);
+  daily.complete(incremental, result(incremental, [{ ...activity, title: '星河科技 2027 届秋季校园专场宣讲会', sourceRefs: [1] }]));
+
+  const page = schedule.page('a', { week: '2026-09-21' });
+  assert.equal(page.activities.length, 1);
+  assert.equal(page.activities[0].sourceCount, 2);
+  assert.deepEqual(daily.details('a', { bucket: 'completed', since: time - 60 }).counts,
+    { pending: 0, running: 0, completed: 2, review: 0 });
+});
+
+test('older completed reply jobs with an empty reference marker detect a later original', async t => {
+  const f = await fixture(t);
+  const time = Date.parse('2026-09-21T04:00:00Z') / 1000;
+  const reply = normalizeMessage({ ...sample(20, ''), time, message: [
+    { type: 'reply', data: { id: '1' } }, { type: 'text', data: { text: '地点补充：报告厅' } },
+  ] }, 'a');
+  f.messages.put([reply]);
+  f.daily.enqueue('a');
+  const first = f.daily.claim('a')!;
+  f.daily.complete(first, result(first, []));
+  const db = new DatabaseSync(f.file);
+  db.prepare("UPDATE schedule_jobs SET references_hash='' WHERE message_key=?").run(reply.key);
+  db.close();
+  f.messages.put([normalizeMessage({ ...sample(1, '星河科技宣讲会'), time: time - 60 }, 'a')]);
+  f.daily.enqueue('a');
+  const next = f.daily.claim('a')!;
+  const retried = next.messages.find(source => source.message.key === reply.key);
+  assert.ok(retried);
+  assert.equal(retried.referenceGraph!.references[0].message.externalId, '1');
 });
 
 test('same-event reposts merge into one row and retain every human source', async t => {
@@ -230,7 +281,7 @@ test('processing details separate pending, running and completed messages and re
   const since = time - 60;
   const pending = daily.details('a', { bucket: 'pending', since });
   assert.equal(pending.total, 2);
-  assert.deepEqual(pending.counts, { pending: 2, running: 0, completed: 0 });
+  assert.deepEqual(pending.counts, { pending: 2, running: 0, completed: 0, review: 0 });
   assert.deepEqual(pending.items.find(item => item.text.includes('星河科技'))?.images,
     [{ segmentIndex: 1, url: 'https://multimedia.example.com/poster.jpg' }]);
   assert.deepEqual(pending.items.find(item => item.text.includes('星河科技'))?.links,
@@ -244,7 +295,7 @@ test('processing details separate pending, running and completed messages and re
   const output = result(job, [{ ...activity, sourceRefs: [1] }]);
   daily.complete(job, output);
   const completed = daily.details('a', { bucket: 'completed', since });
-  assert.deepEqual(completed.counts, { pending: 0, running: 0, completed: 2 });
+  assert.deepEqual(completed.counts, { pending: 0, running: 0, completed: 2, review: 0 });
   assert.deepEqual(completed.items.find(item => item.text.includes('星河科技'))?.activityTitles, [activity.title]);
   assert.deepEqual(completed.items.find(item => item.text.includes('谢谢'))?.activityTitles, []);
   assert.deepEqual(daily.structuredResult('a', '2026-09-21'), output.activities);
@@ -266,12 +317,36 @@ test('partial daily results mark only affected messages for review', async t => 
   daily.complete(job, output);
 
   const completed = daily.details('a', { bucket: 'completed', since: time - 60 });
-  const affected = completed.items.find(item => item.text.includes('链接'))!;
+  const review = daily.details('a', { bucket: 'review', since: time - 60 });
+  const affected = review.items.find(item => item.text.includes('链接'))!;
   const ordinary = completed.items.find(item => item.text.includes('普通'))!;
+  assert.equal(completed.items.some(item => item.text.includes('链接')), false);
+  assert.equal(review.items.some(item => item.text.includes('普通')), false);
+  assert.deepEqual(review.counts, { pending: 0, running: 0, completed: 1, review: 1 });
   assert.equal(affected.state, 'partial');
   assert.equal(affected.error, '链接读取失败');
   assert.equal(ordinary.state, 'completed');
   assert.equal(ordinary.error, '');
+});
+
+test('failed daily messages leave pending and expose their error in review', async t => {
+  const { messages, daily } = await fixture(t);
+  const time = Date.parse('2026-09-21T04:00:00Z') / 1000;
+  messages.put([normalizeMessage({ ...sample(1, '无法处理的宣讲会图片'), time }, 'a')]);
+  daily.enqueue('a');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const job = daily.claim('a')!;
+    daily.fail(job, '模型输出格式错误', 0);
+  }
+
+  const pending = daily.details('a', { bucket: 'pending', since: time - 60 });
+  const review = daily.details('a', { bucket: 'review', since: time - 60 });
+  assert.equal(pending.total, 0);
+  assert.equal(review.total, 1);
+  assert.equal(review.items[0].state, 'failed');
+  assert.equal(review.items[0].error, '模型输出格式错误');
+  assert.throws(() => daily.retry('a', 'missing-message'), /不存在|当前账号/);
+  assert.equal(daily.status('a').failed, 1);
 });
 
 test('links are classified before reading and oversized days split in stable source order', () => {
@@ -284,7 +359,13 @@ test('links are classified before reading and oversized days split in stable sou
     ref, message, contentHash: `hash-${ref}`, groupName: '测试群', displayTime: '2026-09-21 12:00:00',
     text: 'x'.repeat(80), extractedContent: '', links: [], materials: [], warnings: [],
   }));
-  assert.deepEqual(splitDailySources(sources, 500).map(chunk => chunk.map(source => source.ref)), [[1], [2], [3]]);
+  const sourceDay = '2026-09-21';
+  const twoSourceSize = JSON.stringify(buildDailyPromptPayload(sourceDay, sources.slice(0, 2))).length;
+  assert.deepEqual(splitDailySources(sources, twoSourceSize - 1, sourceDay).map(chunk => chunk.map(source => source.ref)), [[1], [2], [3]]);
+  assert.equal(dailyPromptCharBudget(defaultModelConfig), 600_000);
+  const oneSourceSize = JSON.stringify(buildDailyPromptPayload(sourceDay, sources.slice(0, 1))).length;
+  assert.throws(() => splitDailySources(sources.slice(0, 1), oneSourceSize - 1, sourceDay), /超过模型上下文预算/);
+  assert.throws(() => dailyPromptCharBudget({ ...defaultModelConfig, contextWindow: 1024, maxTokens: 1024 }), /上下文配置不足/);
 });
 
 test('daily agent exposes two focused tools and link reader stays within source evidence', async () => {
@@ -382,6 +463,17 @@ test('processor runs different days concurrently while keeping one lease per day
   assert.equal(f.daily.status('a').running, 0);
 });
 
+test('processing configuration cannot advance another account after a login switch', async t => {
+  const f = await fixture(t);
+  const settings = { config: defaultModelConfig, apiKey: 'test-key', updatedAt: new Date().toISOString() };
+  f.processor = new DailyScheduleProcessor(f.daily, async () => settings, async job => result(job, []), () => {});
+  f.processor.setAccount('a');
+  await assert.rejects(f.processor.configure({ enabled: true, concurrency: 2, syncedThrough: 456,
+    expectedAccountId: 'previous-account' }), /账号已切换/);
+  assert.equal(f.daily.status('a').lastSyncedAt, 0);
+  assert.equal(f.daily.status('a').enabled, false);
+});
+
 test('one-time processing respects its start time and stops when the queue becomes idle', async t => {
   const f = await fixture(t);
   const oldTime = Date.parse('2026-09-17T04:00:00Z') / 1000;
@@ -413,14 +505,28 @@ test('one-time processing respects its start time and stops when the queue becom
 test('reopening storage pauses an unfinished one-time sync', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'chancekit-daily-restart-'));
   const file = path.join(root, 'messages.sqlite');
+  const messages = new Store(file);
+  messages.saveGroups('a', [{ group_id: 731234567, group_name: '就业信息一群' }]);
+  messages.follow('a', '731234567', true);
+  messages.put([normalizeMessage({ ...sample(1, '尚未完成的整理'), time: 200 }, 'a')]);
+  const schedule = new ScheduleStore(file);
   const first = new DailyScheduleStore(file);
-  first.configure('a', { enabled: true, concurrency: 3, stopWhenIdle: true, since: 123 });
+  first.configure('a', { enabled: true, concurrency: 3, stopWhenIdle: true, since: 123, syncedThrough: 456,
+    syncedGroupIds: ['731234567'] });
+  first.enqueue('a');
+  assert.ok(first.claim('a'));
   assert.equal(first.status('a').enabled, true);
   first.close();
+  schedule.close();
+  messages.close();
 
   const reopened = new DailyScheduleStore(file);
   t.after(() => { reopened.close(); return rm(root, { recursive: true, force: true }); });
   assert.equal(reopened.status('a').enabled, false);
   assert.equal(reopened.status('a').stopWhenIdle, false);
   assert.equal(reopened.status('a').since, 123);
+  assert.equal(reopened.status('a').lastSyncedAt, 456);
+  assert.deepEqual(reopened.status('a').groupLastSyncedAt, { '731234567': 456 });
+  assert.deepEqual(reopened.details('a', { bucket: 'pending', since: 123 }).counts,
+    { pending: 1, running: 0, completed: 0, review: 0 });
 });

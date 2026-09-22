@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, utilityProcess, Menu, net } from 'electron';
-import { mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
+import { mkdir, writeFile, copyFile } from 'node:fs/promises';
+import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Command } from '../src/shared';
@@ -24,12 +25,14 @@ import { printWebpagePdf } from './webpage-pdf-printer';
 import { registerOnboardingIpc } from './onboarding/ipc';
 import { OnboardingStore } from './onboarding/store';
 import { applicationMenuTemplate } from './application-menu';
+import { SavedConnectionStore } from './core/connection/saved-connection';
 import { JobChatStore } from './core/chat/store';
 import { JobChatAgent } from './core/chat/agent';
 
 app.setName(BRAND.name);
 const profile = process.env.CHANCEKIT_TEST_DATA ? path.resolve(process.env.CHANCEKIT_TEST_DATA)
   : app.isPackaged ? resolveProfileDirectory(app.getPath('appData')) : path.resolve('.dev-data');
+const instancePidFile = path.join(profile, 'chancekit.pid');
 app.setPath('userData', profile);
 if (!app.requestSingleInstanceLock()) app.quit();
 let window: BrowserWindow | undefined;
@@ -64,6 +67,7 @@ function request<T = any>(command: Command | AttachmentRequest | ReplyRequest, s
 app.whenReady().then(async () => {
   const root = app.getPath('userData');
   await mkdir(root, { recursive: true, mode: 0o700 });
+  await writeFile(instancePidFile, String(process.pid), { mode: 0o600 });
   const componentArchive = path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'), 'napcat', RELEASE.archive);
   worker = utilityProcess.fork(path.join(__dirname, 'worker.cjs'), [root, componentArchive], { serviceName: `${BRAND.name}消息服务` });
   const ready = new Promise<void>(resolve => {
@@ -71,8 +75,9 @@ app.whenReady().then(async () => {
       if (data.ready) resolve();
       if (data.event?.type === 'state') {
         archiveAccountId = data.event.state.localAccount?.id ?? '';
-        processor?.setAccount(archiveAccountId);
-        const signature = JSON.stringify([archiveAccountId, data.event.state.groups
+        const processingAccountId = data.event.state.account?.id ?? '';
+        processor?.setAccount(processingAccountId);
+        const signature = JSON.stringify([processingAccountId, data.event.state.groups
           .filter((group: { followed: boolean }) => group.followed)
           .map((group: { id: string; name: string }) => [group.id, group.name])]);
         if (signature !== followedSignature) { followedSignature = signature; processor?.refresh(); }
@@ -92,6 +97,14 @@ app.whenReady().then(async () => {
     if (!quitting && window) dialog.showErrorBox('消息服务已停止', `请重新打开${BRAND.name}。已经归档的消息保留在本机。`);
   });
   const connectionPath = path.join(root, 'connection.enc');
+  const encryptionAvailable = () => safeStorage.isEncryptionAvailable()
+    && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text');
+  const savedConnection = new SavedConnectionStore(connectionPath, {
+    available: encryptionAvailable,
+    encrypt: value => safeStorage.encryptString(value),
+    decrypt: value => safeStorage.decryptString(value),
+  });
+  let connectionIntent = 0;
   function verifySender(event: Electron.IpcMainInvokeEvent) {
     if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Untrusted IPC sender');
   }
@@ -103,8 +116,7 @@ app.whenReady().then(async () => {
     openExternal: url => shell.openExternal(url),
   });
   const modelSettings = new ModelSettingsStore(root, {
-    isEncryptionAvailable: () => safeStorage.isEncryptionAvailable()
-      && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
+    isEncryptionAvailable: encryptionAvailable,
     encryptString: value => safeStorage.encryptString(value),
     decryptString: value => safeStorage.decryptString(value),
   });
@@ -166,7 +178,7 @@ app.whenReady().then(async () => {
       });
     },
     () => { if (!window?.isDestroyed()) window?.webContents.send('chancekit:event', { type: 'schedule' }); });
-  processor.setAccount(archiveAccountId);
+  processor.setAccount(initial.account?.id ?? '');
   ipcMain.handle('chancekit:schedule:list', (event, input) => {
     verifySender(event);
     const query = scheduleQuerySchema.parse(input);
@@ -258,20 +270,19 @@ app.whenReady().then(async () => {
   ipcMain.handle('chancekit:request', async (event, input) => {
     verifySender(event);
     const command = commandSchema.parse(input);
+    const intent = ['start', 'connect', 'disconnect'].includes(command.type) ? ++connectionIntent : connectionIntent;
     await ready;
     const result = await request(command);
-    if (command.type === 'connect' && safeStorage.isEncryptionAvailable()) {
-      await writeFile(connectionPath, safeStorage.encryptString(JSON.stringify(command.config)), { mode: 0o600 });
+    if (intent === connectionIntent) {
+      if (command.type === 'connect') await savedConnection.save({ version: 1, mode: 'external', config: command.config });
+      if (command.type === 'start') await savedConnection.save({ version: 1, mode: 'managed', path: command.path });
     }
     return result;
   });
   ipcMain.handle('chancekit:connection', async event => {
     verifySender(event);
-    try {
-      if (!safeStorage.isEncryptionAvailable()) return {};
-      const stored = JSON.parse(safeStorage.decryptString(await readFile(connectionPath)));
-      return stored;
-    } catch { return {}; }
+    const stored = await savedConnection.load();
+    return stored?.mode === 'external' ? stored.config : {};
   });
   ipcMain.handle('chancekit:choose-qq', async event => {
     verifySender(event);
@@ -293,6 +304,13 @@ app.whenReady().then(async () => {
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('不支持这个链接。');
     await shell.openExternal(url.href);
   });
+  if (initial.localAccount && !process.env.CHANCEKIT_DISABLE_AUTO_CONNECT) {
+    void savedConnection.load().then(stored => {
+      if (connectionIntent !== 0) return;
+      if (stored?.mode === 'managed') return request({ type: 'start', path: stored.path });
+      if (stored?.mode === 'external') return request({ type: 'connect', config: stored.config });
+    }).catch(error => console.error('自动恢复 QQ 连接失败：', error instanceof Error ? error.message : error));
+  }
   Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(BRAND.name)));
   window = new BrowserWindow({ width: 1240, height: 820, minWidth: 900, minHeight: 640, backgroundColor: '#ffffff', title: BRAND.name, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
@@ -304,6 +322,8 @@ app.whenReady().then(async () => {
   else await window.loadFile(path.join(__dirname, '../dist/index.html'));
   app.on('second-instance', () => { if (window?.isMinimized()) window.restore(); window?.focus(); });
 });
+
+process.on('exit', () => { try { rmSync(instancePidFile, { force: true }); } catch {} });
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {

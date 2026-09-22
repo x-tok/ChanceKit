@@ -11,11 +11,14 @@ export function createDailyAgentTools(input: {
   settings: StoredModelSettings;
   options: DailyExtractionOptions;
   submit: (value: DailyActivityOutput) => void;
-}): AgentTool<any>[] {
+}): { tools: AgentTool<any>[]; allowedLinks: Set<string> } {
+  const allowedLinks = new Set(input.sources.flatMap(source => source.links.map(link => link.url)));
   const refs = new Set(input.sources.map(source => source.ref));
-  const links = new Set(input.sources.flatMap(source => source.links.map(link => link.url)));
-  return [
-    createReadSourceLinksTool(input.sources, input.settings, input.options, links),
-    createSubmitDailyActivitiesTool(refs, links, input.submit),
-  ];
+  return {
+    tools: [
+      createReadSourceLinksTool(input.sources, input.settings, input.options, allowedLinks),
+      createSubmitDailyActivitiesTool(refs, allowedLinks, input.submit),
+    ],
+    allowedLinks,
+  };
 }

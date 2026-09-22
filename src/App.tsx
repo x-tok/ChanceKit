@@ -37,8 +37,9 @@ export function App() {
   const [toast, setToast] = useState('');
   const [messageRevision, setMessageRevision] = useState(0);
   const previousAccount = useRef('');
-  const online = state.phase === 'online';
+  const online = state.phase === 'online' && Boolean(state.account);
   const account = online ? state.account : undefined;
+  const visibleGroups = online ? state.groups : [];
   const notify = useCallback((text: string) => setToast(text), []);
   const run = useCallback(async (action: () => Promise<unknown>) => { try { await action(); } catch (error) { notify(messageError(error)); } }, [notify]);
   useEffect(() => {
@@ -54,11 +55,11 @@ export function App() {
       .catch(error => { notify(messageError(error)); setOnboarding('required'); });
   }, [notify]);
   useEffect(() => {
-    const id = state.localAccount?.id || '';
+    const id = account?.id || '';
     if (previousAccount.current !== id) { previousAccount.current = id; setSelected(''); }
-  }, [state.localAccount?.id]);
+  }, [account?.id]);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 8000); return () => clearTimeout(timer); }, [toast]);
-  const selectedGroup = state.groups.find(group => group.id === selected);
+  const selectedGroup = visibleGroups.find(group => group.id === selected);
   if (onboarding === 'loading') return <div className={s.appLoading}><LoaderCircle className={s.spin} size={24} /><span>正在准备{BRAND.name}</span></div>;
   if (onboarding === 'required') return <Onboarding state={state} onComplete={() => { setOnboarding('complete'); setView('schedule'); }} />;
   return <div className={s.app}>
@@ -71,7 +72,7 @@ export function App() {
       <nav aria-label="主导航">
         <button className={view === 'schedule' ? s.navActive : ''} aria-current={view === 'schedule' ? 'page' : undefined} onClick={() => setView('schedule')}><CalendarDays size={18} /><span>日程</span></button>
         <button className={view === 'job-chat' ? s.navActive : ''} aria-current={view === 'job-chat' ? 'page' : undefined} onClick={() => setView('job-chat')}><BriefcaseBusiness size={18} /><span>助手</span></button>
-        <button className={view === 'messages' ? s.navActive : ''} onClick={() => setView('messages')}><MessageCircle size={18} /><span>群消息</span>{state.groups.filter(g => g.followed).length > 0 && <small>{state.groups.filter(g => g.followed).length}</small>}</button>
+        <button className={view === 'messages' ? s.navActive : ''} onClick={() => setView('messages')}><MessageCircle size={18} /><span>群消息</span>{visibleGroups.filter(g => g.followed).length > 0 && <small>{visibleGroups.filter(g => g.followed).length}</small>}</button>
         <button className={view === 'settings' ? s.navActive : ''} aria-current={view === 'settings' ? 'page' : undefined} onClick={() => { setSettingsOpened(true); setView('settings'); }}><Settings2 size={18} /><span>设置</span></button>
       </nav>
       <div className={s.navBottom}>
@@ -84,11 +85,11 @@ export function App() {
         <div className={s.breadcrumb}>工作空间 <span>/</span> <strong>{view === 'settings' ? '设置' : view === 'schedule' ? '日程' : view === 'job-chat' ? '助手' : '群消息'}</strong></div>
         <div className={s.topbarRight}>{!isDesktop && <span className={s.previewBadge}>浏览器预览</span>}<span className={`${s.connectionStatus} ${online ? s.connected : ''}`}><span />{phases[state.phase]}</span></div>
       </header>
-      {view === 'messages' ? <Workspace key={state.localAccount?.id || 'empty'} state={state} group={selectedGroup} select={setSelected} revision={messageRevision} run={run} notify={notify} onConnect={() => { setSettingsOpened(true); setView('settings'); }} /> : null}
+      {view === 'messages' ? <Workspace key={account?.id || 'offline'} state={state} group={selectedGroup} select={setSelected} revision={messageRevision} run={run} notify={notify} onConnect={() => { setSettingsOpened(true); setView('settings'); }} /> : null}
       {view === 'job-chat' && <JobChatPage key={state.localAccount?.id || 'empty'} state={state} onModels={() => { setSettingsOpened(true); setView('settings'); }} />}
       {settingsOpened && <SettingsPage active={view === 'settings'} state={state} run={run} onMessages={() => setView('messages')} />}
       {view === 'schedule' && <Schedule state={state} onModels={() => { setSettingsOpened(true); setView('settings'); }} onGroup={id => { setSelected(id); setView('messages'); }} />}
-      <footer className={s.statusbar}><span><span className={`${s.statusDot} ${online ? s.liveDot : ''}`} />{state.detail}</span><span>{number.format(state.archived)} 条已归档{state.lastEventAt && ` · 最近消息 ${time(state.lastEventAt)}`}</span></footer>
+      <footer className={s.statusbar}><span><span className={`${s.statusDot} ${online ? s.liveDot : ''}`} />{state.detail}</span>{online && <span>{number.format(state.archived)} 条已归档{state.lastEventAt && ` · 最近消息 ${time(state.lastEventAt)}`}</span>}</footer>
     </main>
     {toast && <div className={s.toast} role="alert"><span>{toast}</span><IconButton label="关闭提示" onClick={() => setToast('')}><X size={16} /></IconButton></div>}
   </div>;
@@ -109,13 +110,18 @@ function Workspace({ state, group, select, revision, run, notify, onConnect }: {
   const groupId = group?.id;
   const selectedId = useRef(groupId);
   selectedId.current = groupId;
-  const online = state.phase === 'online';
-  const groups = state.groups.filter(g => (!onlyFollowed || g.followed) && `${g.name} ${g.id}`.toLowerCase().includes(groupSearch.toLowerCase()));
+  const online = state.phase === 'online' && Boolean(state.account);
+  const groups = online ? state.groups.filter(g => (!onlyFollowed || g.followed) && `${g.name} ${g.id}`.toLowerCase().includes(groupSearch.toLowerCase())) : [];
   useEffect(() => { setSearch(''); setOffset(0); setPage({ messages: [], total: 0, hasMore: false }); }, [groupId]);
-  useEffect(() => { if (!online) setCanOlder({}); }, [online]);
+  useEffect(() => {
+    if (online) return;
+    readGeneration.current++;
+    setPage({ messages: [], total: 0, hasMore: false });
+    setBoundary({}); setCanOlder({}); setLoading(false); setExporting(false);
+  }, [online]);
   useEffect(() => {
     const generation = ++readGeneration.current;
-    if (!groupId) return;
+    if (!online || !groupId) return;
     setLoading(true);
     const timer = setTimeout(() => {
       void bridge.request<MessagePage>({ type: 'messages', groupId, search, offset }).then(result => {
@@ -126,7 +132,7 @@ function Workspace({ state, group, select, revision, run, notify, onConnect }: {
       }).catch(error => { if (generation === readGeneration.current) notify(messageError(error)); }).finally(() => { if (generation === readGeneration.current) setLoading(false); });
     }, search ? 180 : 0);
     return () => { clearTimeout(timer); readGeneration.current++; };
-  }, [groupId, search, offset, revision, notify]);
+  }, [online, groupId, search, offset, revision, notify]);
   const loadHistory = async (older: boolean) => {
     if (!groupId) return;
     let result: HistoryResult;
@@ -144,6 +150,14 @@ function Workspace({ state, group, select, revision, run, notify, onConnect }: {
     setOffset(older ? Math.max(0, current.total - 100) : 0);
     if (!older) { setPage(current); requestAnimationFrame(() => scroller.current?.scrollTo({ top: scroller.current.scrollHeight })); }
   };
+  if (!online) return <div className={s.workspaceLoggedOut}>
+    <div className={s.readerEmpty}>
+      <div className={s.emptyMark}><Plug size={34} strokeWidth={1.3} /></div>
+      <h2>请先登录 QQ</h2>
+      <p>登录后查看群聊和已同步的消息。</p>
+      <button className={s.primaryButton} onClick={onConnect}><Settings2 size={16} />前往设置</button>
+    </div>
+  </div>;
   return <div className={`${s.workspace} ${group ? s.hasSelection : ''}`}>
     <section className={s.groupPanel} aria-label="群列表">
       <div className={s.groupPanelHeading}><h1>群聊 <span>{state.groups.length}</span></h1><IconButton label="刷新群列表" disabled={!online} onClick={() => void run(() => bridge.request({ type: 'refreshGroups' }))}><RefreshCw size={16} /></IconButton></div>

@@ -67,7 +67,7 @@ test('DeepSeek V4.1 Flash and domestic completions providers send their own thin
       const config = { ...configForProvider(provider), baseUrl, reasoningLevel };
       assert.equal((await testPiModel({ ...stored, config })).reply, 'OK');
       assert.equal(body.model, config.modelId);
-      assert.equal(body.max_tokens ?? body.max_completion_tokens, 4096);
+      assert.equal(body.max_tokens ?? body.max_completion_tokens, config.maxTokens);
       if (id === 'qwen') {
         assert.equal(body.enable_thinking, reasoningLevel !== 'off');
         assert.equal(body.reasoning_effort, undefined);

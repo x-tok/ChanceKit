@@ -11,6 +11,7 @@ const tabs: { bucket: ProcessingMessageBucket; label: string }[] = [
   { bucket: 'pending', label: '待整理' },
   { bucket: 'running', label: '整理中' },
   { bucket: 'completed', label: '已完成' },
+  { bucket: 'review', label: '需处理' },
 ];
 
 const contentLabels: Record<string, { label: string; icon: typeof Image }> = {
@@ -50,7 +51,7 @@ function MessageItem({ item, onError }: { item: ProcessingMessageItem; onError: 
   </li>;
 }
 
-export function SyncDialog({ open, onClose, status, progress, since, groups, busy, error, revision, canStart, onStart, onStop, onRetry, onModels, outdated }: {
+export function SyncDialog({ open, onClose, status, progress, since, groups, busy, error, revision, startDisabledReason, onStart, onStop, onRetry, onModels, outdated }: {
   open: boolean;
   onClose: () => void;
   status: ProcessingStatus;
@@ -60,10 +61,10 @@ export function SyncDialog({ open, onClose, status, progress, since, groups, bus
   busy: boolean;
   error: string;
   revision: number;
-  canStart: boolean;
+  startDisabledReason: string;
   onStart: () => void;
   onStop: () => void;
-  onRetry: () => void;
+  onRetry: (messageKeys: string[]) => void;
   onModels: () => void;
   outdated?: boolean;
 }) {
@@ -77,8 +78,10 @@ export function SyncDialog({ open, onClose, status, progress, since, groups, bus
   const organizing = status.enabled || status.running > 0;
   const totalJobs = status.pending + status.running + status.completed + status.partial + status.failed;
   const doneJobs = status.completed + status.partial + status.failed;
-  const settled = !reading && !organizing && totalJobs > 0 && status.pending === 0;
-  const hasIssues = status.partial + status.failed > 0;
+  const hasSynced = Boolean(status.lastSyncedAt);
+  const settled = !reading && !organizing && status.pending === 0 && (totalJobs > 0 || hasSynced);
+  const issueJobs = status.partial + status.failed;
+  const hasIssues = issueJobs > 0;
   const percent = reading
     ? Math.round((progress!.completed / Math.max(1, progress!.total)) * 35)
     : organizing ? Math.round(35 + (doneJobs / Math.max(1, totalJobs)) * 65) : settled ? 100 : 0;
@@ -107,12 +110,15 @@ export function SyncDialog({ open, onClose, status, progress, since, groups, bus
 
   useEffect(() => { void load(false); return () => { request.current++; }; }, [bucket, open, revision, since, status.pending, status.running, status.completed, status.partial, status.failed]);
 
-  const title = reading ? '正在读取群聊消息' : organizing ? '正在整理日程' : hasIssues && settled ? '部分消息需要处理' : settled ? '本次同步已完成' : '同步群聊消息';
+  const title = reading ? '正在读取群聊消息' : organizing ? '正在整理日程' : hasIssues && settled ? `同步结束，${issueJobs} 个日期批次需处理` : settled ? '本次同步已完成' : '同步群聊消息';
   const description = reading
     ? `正在读取 ${progress!.group || '群聊记录'}，本次新增 ${progress!.added.toLocaleString()} 条消息`
     : organizing ? 'AI 正在按日期读取文字、链接和图片，完成后会自动停止'
-      : settled ? '日程已经更新，后续新消息需要手动再次同步' : '读取最近三天的关注群消息，并整理成日程';
-  const empty = bucket === 'pending' ? '没有待整理的消息' : bucket === 'running' ? '当前没有正在整理的消息' : '还没有整理完成的消息';
+      : hasIssues && settled ? '日程已经更新，未完整处理的内容已单独列出，请核对后重试'
+        : settled ? '日程已经更新，后续可手动同步新增消息'
+          : hasSynced ? '读取上次同步后的新增消息，并整理成日程' : '读取最近三天的关注群消息，并整理成日程';
+  const empty = bucket === 'pending' ? '没有待整理的消息' : bucket === 'running' ? '当前没有正在整理的消息'
+    : bucket === 'review' ? '没有需要处理的消息' : '还没有整理完成的消息';
 
   return <dialog ref={dialog} className={s.dialog} onClose={onClose} onClick={event => { if (event.target === dialog.current) onClose(); }}>
     <header className={s.header}>
@@ -120,25 +126,31 @@ export function SyncDialog({ open, onClose, status, progress, since, groups, bus
       <button className={common.iconButton} aria-label="关闭同步详情" title="关闭同步详情" onClick={onClose}><X size={19} /></button>
     </header>
 
-    <section className={s.overview} aria-label="同步进度">
+    <section className={s.overview} aria-label="同步进度" data-state={settled && hasIssues ? 'issue' : undefined}>
       <div className={s.progressHeading}><strong>{percent}%</strong><span>{doneJobs} / {totalJobs || '–'} 个日期批次</span></div>
       <div className={s.progressTrack} role="progressbar" aria-label="同步进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ transform: `scaleX(${percent / 100})` }} /></div>
       <ol className={s.stages} aria-label="同步阶段">
         <li data-state={reading ? 'active' : organizing || settled ? 'done' : 'idle'}><span>{reading ? <LoaderCircle size={12} className={common.spin} /> : organizing || settled ? <Check size={12} /> : '1'}</span>读取消息</li>
         <li data-state={organizing ? 'active' : settled ? 'done' : 'idle'}><span>{organizing ? <LoaderCircle size={12} className={common.spin} /> : settled ? <Check size={12} /> : '2'}</span>AI 整理</li>
-        <li data-state={settled ? 'done' : 'idle'}><span>{settled ? <Check size={12} /> : '3'}</span>完成</li>
+        <li data-state={settled ? hasIssues ? 'issue' : 'done' : 'idle'}><span>{settled ? hasIssues ? <AlertCircle size={12} /> : <Check size={12} /> : '3'}</span>{settled && hasIssues ? '需处理' : '完成'}</li>
       </ol>
       <dl className={s.metrics}>
         <div><dt>关注群聊</dt><dd>{groups}</dd></div>
-        <div><dt>待整理消息</dt><dd>{details.counts.pending}</dd></div>
-        <div><dt>正在整理</dt><dd>{details.counts.running}</dd></div>
-        <div><dt>已完成消息</dt><dd>{details.counts.completed}</dd></div>
+        {settled ? <>
+          <div><dt>成功批次</dt><dd>{status.completed}</dd></div>
+          <div data-state={hasIssues ? 'issue' : undefined}><dt>需处理批次</dt><dd>{issueJobs}</dd></div>
+          <div><dt>已处理消息</dt><dd>{details.counts.completed + details.counts.review}</dd></div>
+        </> : <>
+          <div><dt>待整理消息</dt><dd>{details.counts.pending}</dd></div>
+          <div><dt>正在整理</dt><dd>{details.counts.running}</dd></div>
+          <div><dt>已处理消息</dt><dd>{details.counts.completed + details.counts.review}</dd></div>
+        </>}
       </dl>
     </section>
 
     {outdated && <div className={s.notice}><RefreshCw size={15} /><span>处理引擎已更新，请重启应用后再同步。</span></div>}
     {(error || detailsError || status.blockedReason) && <div className={s.notice} role="alert"><AlertCircle size={15} /><span>{error || detailsError || status.blockedReason}</span>{status.blockedReason && <button className={common.textButton} onClick={onModels}>模型配置</button>}</div>}
-    {hasIssues && !organizing && <div className={s.notice}><AlertCircle size={15} /><span>{status.partial + status.failed} 个日期批次需要重试或核对</span><button className={common.textButton} disabled={busy} onClick={onRetry}><RefreshCw size={14} />重试</button></div>}
+    {hasIssues && !organizing && <div className={s.notice}><AlertCircle size={15} /><span>{issueJobs} 个日期批次未完整处理，相关消息已归入“需处理”</span><button className={common.textButton} onClick={() => setBucket('review')}>查看内容</button></div>}
 
     <nav className={s.tabs} aria-label="消息整理状态">
       {tabs.map(tab => <button key={tab.bucket} aria-current={bucket === tab.bucket ? 'page' : undefined} onClick={() => setBucket(tab.bucket)}>
@@ -146,6 +158,11 @@ export function SyncDialog({ open, onClose, status, progress, since, groups, bus
       </button>)}
     </nav>
     <div className={s.messageList} role="region" aria-label={`${tabs.find(tab => tab.bucket === bucket)!.label}消息列表`} aria-busy={loading}>
+      {bucket === 'review' && hasIssues && <div className={s.reviewHeading}>
+        <p><strong>需要核对的原始消息</strong><span>这里保留未完整读取或处理失败的文字、图片、链接和失败原因。</span></p>
+        <button className={common.secondaryButton} disabled={busy || loading || !details.items.length}
+          onClick={() => onRetry(details.items.map(item => item.key))}><RefreshCw size={14} />重新处理当前列表</button>
+      </div>}
       {details.items.length > 0 ? <ul>{details.items.map(item => <MessageItem key={item.key} item={item} onError={setDetailsError} />)}</ul>
         : <div className={s.empty}>{loading ? <LoaderCircle size={20} className={common.spin} /> : <CircleEllipsis size={22} />}<strong>{loading ? '正在读取消息' : empty}</strong></div>}
       {details.hasMore && <button className={`${common.secondaryButton} ${s.loadMore}`} disabled={loading} onClick={() => void load(true)}>加载更多</button>}
@@ -154,7 +171,10 @@ export function SyncDialog({ open, onClose, status, progress, since, groups, bus
     <footer className={s.footer}>
       <p><strong>同步会产生 API 费用，请留意账户额度。</strong><span>每次完成后自动停止。</span></p>
       {reading || organizing ? <button className={s.stopButton} disabled={busy && !reading} onClick={onStop}><Square size={14} />停止同步</button>
-        : <button className={common.primaryButton} disabled={!canStart || busy} onClick={onStart}><CloudDownload size={15} />{settled ? '再次同步' : '开始同步'}</button>}
+        : <span className={s.disabledAction} tabIndex={startDisabledReason ? 0 : undefined}>
+          <button className={common.primaryButton} disabled={Boolean(startDisabledReason)} aria-describedby={startDisabledReason ? 'sync-start-unavailable' : undefined} onClick={onStart}><CloudDownload size={15} />{hasSynced ? '同步新增消息' : '开始同步'}</button>
+          {startDisabledReason && <span id="sync-start-unavailable" className={s.actionTooltip} role="tooltip">{startDisabledReason}</span>}
+        </span>}
     </footer>
   </dialog>;
 }

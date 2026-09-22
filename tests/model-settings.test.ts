@@ -115,6 +115,7 @@ test('domestic presets have valid provider-specific defaults and custom starts e
   assert.equal(defaultModelConfig.provider, 'deepseek');
   assert.equal(defaultModelConfig.imageInput, true);
   assert.equal(defaultModelConfig.contextWindow, 1000000);
+  assert.equal(defaultModelConfig.maxTokens, 32768);
   assert.deepEqual(modelProviderPresets.map(provider => provider.id), ['deepseek', 'qwen', 'moonshotai-cn', 'zhipu', 'minimax-cn', 'custom']);
   for (const provider of modelProviderPresets.filter(provider => provider.id !== 'custom')) {
     assert.ok(provider.models.length > 0);
@@ -132,6 +133,19 @@ test('domestic presets have valid provider-specific defaults and custom starts e
   assert.equal(custom.baseUrl, '');
   assert.equal(custom.reasoning, false);
   assert.equal(custom.imageInput, false);
+});
+
+test('an explicitly saved output limit survives restart without replacing credentials', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'chancekit-model-output-limit-'));
+  const crypto = encryption();
+  const previous = { ...defaultModelConfig, maxTokens: 4096 };
+  try {
+    const store = new ModelSettingsStore(root, crypto);
+    await store.save({ config: previous, apiKey: 'existing-key' });
+    const restarted = new ModelSettingsStore(root, crypto);
+    assert.equal((await restarted.get()).config?.maxTokens, 4096);
+    assert.equal((await restarted.saved())?.apiKey, 'existing-key');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('legacy saved providers remain readable without applying new defaults or replacing credentials', async () => {
