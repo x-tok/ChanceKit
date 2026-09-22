@@ -1,9 +1,11 @@
 import type { DesktopBridge } from './shared';
 import { emptyInformationPage, emptyProcessingDetails, emptyProcessingStatus } from './schedule';
+import type { JobChatOverview } from './chat';
 
 export const isDesktop = Boolean(window.desktop);
 const desktopOnly = async (): Promise<never> => { throw new Error('请在见机桌面客户端中连接 QQ。浏览器仅提供界面预览。'); };
 const modelDesktopOnly = async (): Promise<never> => { throw new Error('模型配置需要在见机桌面客户端中保存和测试。'); };
+const emptyJobChat: JobChatOverview = { sessions: [], dataset: { information: 0, incomplete: 0, followedGroups: 0 } };
 export const bridge: DesktopBridge = window.desktop ?? {
   platform: /Mac/i.test(navigator.userAgent) ? 'darwin' : /Windows/i.test(navigator.userAgent) ? 'win32' : 'linux',
   request: desktopOnly, subscribe: () => () => {}, chooseQQ: desktopOnly,
@@ -22,4 +24,10 @@ export const bridge: DesktopBridge = window.desktop ?? {
   processingStatus: async () => ({ ...emptyProcessingStatus, issues: [] }),
   processingDetails: async () => ({ ...emptyProcessingDetails, items: [] }),
   configureProcessing: desktopOnly, retryProcessing: desktopOnly,
+  jobChatOverview: async () => emptyJobChat,
+  jobChatSession: async () => null,
+  jobChatResult: async () => null,
+  sendJobChat: modelDesktopOnly,
+  cancelJobChat: async () => {},
+  deleteJobChat: async () => false,
 };

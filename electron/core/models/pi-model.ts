@@ -1,4 +1,4 @@
-import { Agent } from '@earendil-works/pi-agent-core';
+import { Agent, type AgentMessage } from '@earendil-works/pi-agent-core';
 import type { Model } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
@@ -47,6 +47,8 @@ interface PiAgentOptions {
   systemPrompt?: string;
   timeoutMs?: number;
   requireToolCall?: boolean;
+  sessionId?: string;
+  transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 }
 
 export function createConfiguredPiAgent(settings: StoredModelSettings, options: PiAgentOptions = {}): Agent {
@@ -80,6 +82,8 @@ export function createConfiguredPiAgent(settings: StoredModelSettings, options: 
       model, systemPrompt: options.systemPrompt ?? 'You are the ChanceKit assistant.',
       thinkingLevel: config.reasoningLevel, tools: [],
     },
+    sessionId: options.sessionId,
+    transformContext: options.transformContext,
     streamFn: (selectedModel, context, streamOptions) => api.streamSimple(selectedModel, context, {
       ...streamOptions,
       apiKey: apiKey || 'local',

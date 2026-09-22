@@ -71,7 +71,14 @@ export interface DesktopBridge {
   processingDetails(query: ProcessingDetailsQuery): Promise<ProcessingDetailsPage>;
   configureProcessing(value: { enabled: boolean; concurrency: number; stopWhenIdle?: boolean; since?: number }): Promise<ProcessingStatus>;
   retryProcessing(messageKey?: string): Promise<ProcessingStatus>;
+  jobChatOverview(): Promise<JobChatOverview>;
+  jobChatSession(sessionId: string): Promise<JobChatDetail | null>;
+  jobChatResult(ref: JobResultRef): Promise<JobResultDetail | null>;
+  sendJobChat(input: { sessionId?: string; content: string }): Promise<JobChatSendResult>;
+  cancelJobChat(sessionId: string): Promise<void>;
+  deleteJobChat(sessionId: string): Promise<boolean>;
 }
 declare global { interface Window { desktop?: DesktopBridge } }
 import type { ModelConfigInput, ModelProviderEntry, ModelSettings, ModelTestResult } from './model-config';
 import type { ActivityDetail, InformationDetail, InformationPage, InformationQuery, ProcessingDetailsPage, ProcessingDetailsQuery, ProcessingStatus, SchedulePage, ScheduleQuery } from './schedule';
+import type { JobChatDetail, JobChatOverview, JobChatSendResult, JobResultDetail, JobResultRef } from './chat';

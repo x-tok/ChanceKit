@@ -24,6 +24,8 @@ import { printWebpagePdf } from './webpage-pdf-printer';
 import { registerOnboardingIpc } from './onboarding/ipc';
 import { OnboardingStore } from './onboarding/store';
 import { applicationMenuTemplate } from './application-menu';
+import { JobChatStore } from './core/chat/store';
+import { JobChatAgent } from './core/chat/agent';
 
 app.setName(BRAND.name);
 const profile = process.env.CHANCEKIT_TEST_DATA ? path.resolve(process.env.CHANCEKIT_TEST_DATA)
@@ -39,6 +41,8 @@ let modelTest: AbortController | undefined;
 let processor: DailyScheduleProcessor | undefined;
 let scheduleStore: ScheduleStore | undefined;
 let titleReader: InformationTitleReader | undefined;
+let jobChatStore: JobChatStore | undefined;
+let jobChatAgent: JobChatAgent | undefined;
 let archiveAccountId = '';
 let followedSignature = '';
 let scheduleRefreshTimer: NodeJS.Timeout | undefined;
@@ -134,6 +138,8 @@ app.whenReady().then(async () => {
   const initial = await request<AppState>({ type: 'state' });
   archiveAccountId = initial.localAccount?.id ?? '';
   scheduleStore = new ScheduleStore(path.join(root, 'messages.sqlite'));
+  jobChatStore = new JobChatStore(path.join(root, 'messages.sqlite'));
+  jobChatAgent = new JobChatAgent(jobChatStore);
   const dailyScheduleStore = new DailyScheduleStore(path.join(root, 'messages.sqlite'));
   const webpagePdfs = new WebpagePdfStore(path.join(root, 'webpage-pdfs'), printWebpagePdf);
   titleReader = new InformationTitleReader(scheduleStore.information, () => archiveAccountId,
@@ -207,6 +213,48 @@ app.whenReady().then(async () => {
   ipcMain.handle('chancekit:schedule:retry', (event, input) => {
     verifySender(event); return processor!.retry(z.string().regex(/^[a-f0-9]{64}$/).optional().parse(input));
   });
+  const sessionIdSchema = z.string().uuid();
+  const chatAccountId = () => archiveAccountId || 'web-only';
+  ipcMain.handle('chancekit:job-chat:overview', event => {
+    verifySender(event);
+    return jobChatStore!.overview(chatAccountId());
+  });
+  ipcMain.handle('chancekit:job-chat:session', (event, input) => {
+    verifySender(event);
+    return jobChatStore!.detail(chatAccountId(), sessionIdSchema.parse(input));
+  });
+  ipcMain.handle('chancekit:job-chat:result', (event, input) => {
+    verifySender(event);
+    const ref = z.object({
+      messageKey: z.string().regex(/^[a-f0-9]{64}$/),
+      activityId: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    }).strict().parse(input);
+    return archiveAccountId ? jobChatStore!.resultDetail(archiveAccountId, ref) : null;
+  });
+  ipcMain.handle('chancekit:job-chat:send', async (event, input) => {
+    verifySender(event);
+    const accountId = chatAccountId();
+    const value = z.object({
+      sessionId: sessionIdSchema.optional(),
+      content: z.string().trim().min(1).max(4000),
+    }).strict().parse(input);
+    const settings = await modelSettings.saved();
+    if (!settings) throw new Error('请先在设置中保存模型配置。');
+    return jobChatAgent!.send(accountId, value.sessionId, value.content, settings, {
+      fetch: (input, init) => net.fetch(input instanceof URL ? input.href : input, init),
+    });
+  });
+  ipcMain.handle('chancekit:job-chat:cancel', (event, input) => {
+    verifySender(event);
+    const id = sessionIdSchema.parse(input);
+    if (jobChatStore!.detail(chatAccountId(), id)) jobChatAgent!.cancel(id);
+  });
+  ipcMain.handle('chancekit:job-chat:delete', (event, input) => {
+    verifySender(event);
+    const id = sessionIdSchema.parse(input);
+    if (jobChatStore!.detail(chatAccountId(), id)) jobChatAgent!.cancel(id);
+    return jobChatStore!.deleteSession(chatAccountId(), id);
+  });
   ipcMain.handle('chancekit:request', async (event, input) => {
     verifySender(event);
     const command = commandSchema.parse(input);
@@ -271,7 +319,12 @@ app.on('before-quit', event => {
   const timer = setTimeout(() => { worker.kill(); finish(); }, 10_000);
   worker.once('exit', finish);
   void (async () => {
-    try { await processor?.close(); scheduleStore?.close(); }
+    try {
+      await processor?.close();
+      jobChatAgent?.close();
+      jobChatStore?.close();
+      scheduleStore?.close();
+    }
     finally {
       if (!shutdownComplete && !workerExited) worker.postMessage({ type: 'shutdown' });
     }
