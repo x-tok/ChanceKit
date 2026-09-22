@@ -1,5 +1,5 @@
 import type { DesktopBridge } from './shared';
-import { emptyInformationPage, emptyProcessingStatus } from './schedule';
+import { emptyInformationPage, emptyProcessingDetails, emptyProcessingStatus } from './schedule';
 
 export const isDesktop = Boolean(window.desktop);
 const desktopOnly = async (): Promise<never> => { throw new Error('请在见机桌面客户端中连接 QQ。浏览器仅提供界面预览。'); };
@@ -20,5 +20,6 @@ export const bridge: DesktopBridge = window.desktop ?? {
   schedule: async () => ({ activities: [], undated: [] }), activity: async () => null,
   recruitingInformation: async () => ({ ...emptyInformationPage, items: [] }), informationDetail: async () => null,
   processingStatus: async () => ({ ...emptyProcessingStatus, issues: [] }),
+  processingDetails: async () => ({ ...emptyProcessingDetails, items: [] }),
   configureProcessing: desktopOnly, retryProcessing: desktopOnly,
 };

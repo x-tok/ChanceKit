@@ -68,9 +68,10 @@ export interface DesktopBridge {
   recruitingInformation(query: InformationQuery): Promise<InformationPage>;
   informationDetail(messageKey: string): Promise<InformationDetail | null>;
   processingStatus(): Promise<ProcessingStatus>;
-  configureProcessing(value: { enabled: boolean; concurrency: number }): Promise<ProcessingStatus>;
+  processingDetails(query: ProcessingDetailsQuery): Promise<ProcessingDetailsPage>;
+  configureProcessing(value: { enabled: boolean; concurrency: number; stopWhenIdle?: boolean; since?: number }): Promise<ProcessingStatus>;
   retryProcessing(messageKey?: string): Promise<ProcessingStatus>;
 }
 declare global { interface Window { desktop?: DesktopBridge } }
 import type { ModelConfigInput, ModelProviderEntry, ModelSettings, ModelTestResult } from './model-config';
-import type { ActivityDetail, InformationDetail, InformationPage, InformationQuery, ProcessingStatus, SchedulePage, ScheduleQuery } from './schedule';
+import type { ActivityDetail, InformationDetail, InformationPage, InformationQuery, ProcessingDetailsPage, ProcessingDetailsQuery, ProcessingStatus, SchedulePage, ScheduleQuery } from './schedule';

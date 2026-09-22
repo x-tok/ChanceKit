@@ -109,12 +109,6 @@
 .groupSelected { background: var(--green-light); }
 .groupSelected .groupIcon { color: var(--green); background: #dcebe1; }
 .emptyGroups { min-height: 100%; display: grid; place-items: center; color: var(--muted); text-align: center; font-size: 12px; }
-.progress { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--panel); }
-.progress > span { color: var(--green); }
-.progress strong { font-size: 12px; font-weight: 600; }
-.progress p { margin-top: 3px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
-.billingNotice { display: inline-flex; align-items: flex-start; gap: 7px; color: #79571b !important; font-weight: 600; }
-.billingNotice svg { margin-top: 1px; flex-shrink: 0; }
 .error { width: 100%; margin-top: 16px; padding: 11px 13px; border-radius: 6px; background: #fbefed; color: var(--danger); font-size: 12px; line-height: 1.7; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

@@ -2,7 +2,7 @@ import { test, expect, chromium } from '@playwright/test';
 import { preview } from 'vite';
 import type { AppEvent, AppState, Command, DesktopBridge } from '../../src/shared';
 import { defaultModelConfig } from '../../src/model-config';
-import { emptyInformationPage, emptyProcessingStatus } from '../../src/schedule';
+import { emptyInformationPage, emptyProcessingDetails, emptyProcessingStatus } from '../../src/schedule';
 
 const groups = [
   { id: '731234567', name: '2027 届校园招聘信息交流', memberCount: 387, maxMembers: 500, followed: false, messageCount: 12, lastMessageAt: 1_789_980_000 },
@@ -21,13 +21,15 @@ test('first-run onboarding completes QQ, DeepSeek and bounded group sync', async
     qq: { path: '/Applications/QQ.app', version: '9.9.21', architecture: 'arm64', platform: 'darwin' } };
   try {
     await page.route('https://q1.qlogo.cn/**', route => route.fulfill({ contentType: 'image/png', path: 'build/icon.png' }));
-    await page.addInitScript(({ initial, groups, defaultModelConfig, emptyProcessingStatus, emptyInformationPage }) => {
+    await page.addInitScript(({ initial, groups, defaultModelConfig, emptyProcessingStatus, emptyProcessingDetails, emptyInformationPage }) => {
       let state = structuredClone(initial);
       let listener: ((event: AppEvent) => void) | undefined;
       const commands: Command[] = [];
+      const processingConfigs: unknown[] = [];
       const emit = () => listener?.({ type: 'state', state: structuredClone(state) });
       Object.assign(window, {
         onboardingCommands: commands,
+        onboardingProcessingConfigs: processingConfigs,
         finishQQLogin: () => {
           state = { ...state, phase: 'online', detail: 'QQ 已连接', qr: undefined, runtime: 'managed',
             account: { id: '100010001', nickname: '见机测试账号' }, localAccount: { id: '100010001', nickname: '见机测试账号' }, groups };
@@ -53,9 +55,12 @@ test('first-run onboarding completes QQ, DeepSeek and bounded group sync', async
         testModelSettings: async () => ({ modelId: 'deepseek-flash', latencyMs: 80, reply: 'OK', inputTokens: 2, outputTokens: 1 }), cancelModelTest: async () => {},
         schedule: async () => ({ activities: [], undated: [] }), activity: async () => null,
         recruitingInformation: async () => emptyInformationPage, informationDetail: async () => null,
-        processingStatus: async () => emptyProcessingStatus, configureProcessing: async () => emptyProcessingStatus, retryProcessing: async () => emptyProcessingStatus,
+        processingStatus: async () => emptyProcessingStatus,
+        processingDetails: async () => emptyProcessingDetails,
+        configureProcessing: async value => { processingConfigs.push(value); return emptyProcessingStatus; },
+        retryProcessing: async () => emptyProcessingStatus,
       } as DesktopBridge;
-    }, { initial, groups, defaultModelConfig, emptyProcessingStatus, emptyInformationPage });
+    }, { initial, groups, defaultModelConfig, emptyProcessingStatus, emptyProcessingDetails, emptyInformationPage });
     await page.goto(server.resolvedUrls!.local[0]);
     await expect(page.getByRole('heading', { name: '先准备好官方 QQ' })).toBeVisible();
     await page.screenshot({ path: 'test-results/onboarding-qq-1280.png' });
@@ -101,11 +106,17 @@ test('first-run onboarding completes QQ, DeepSeek and bounded group sync', async
     await page.setViewportSize({ width: 375, height: 820 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: 'test-results/onboarding-groups-375.png' });
-    await page.getByRole('button', { name: /同步 1 个群聊并开始整理/ }).click();
+    await page.getByRole('button', { name: /关注 1 个群聊并进入日程/ }).click();
     await expect(page.getByRole('heading', { name: '日程', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { onboardingCommands: Command[] }).onboardingCommands.some(command => command.type === 'history'))).toBe(false);
+    expect(await page.evaluate(() => (window as unknown as { onboardingProcessingConfigs: unknown[] }).onboardingProcessingConfigs)).toEqual([]);
+    await page.getByRole('button', { name: '开始同步', exact: true }).click();
+    await expect(page.getByRole('dialog')).toContainText('同步会产生 API 费用');
+    await page.getByRole('dialog').getByRole('button', { name: '开始同步', exact: true }).click();
     const history = await page.evaluate(() => (window as unknown as { onboardingCommands: Command[] }).onboardingCommands.find(command => command.type === 'history'));
     expect(history).toMatchObject({ type: 'history', groupId: '731234567', older: false });
     expect((history as Extract<Command, { type: 'history' }>).since).toBeGreaterThan(0);
+    await expect.poll(async () => page.evaluate(() => (window as unknown as { onboardingProcessingConfigs: any[] }).onboardingProcessingConfigs.at(-1)?.stopWhenIdle)).toBe(true);
   } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
 });
 

@@ -1,7 +1,7 @@
 import { test, expect, chromium } from '@playwright/test';
 import { preview } from 'vite';
 import type { Activity, ActivitySource, ScheduleQuery } from '../../src/schedule';
-import { emptyInformationPage, emptyProcessingStatus } from '../../src/schedule';
+import { emptyInformationPage, emptyProcessingDetails, emptyProcessingStatus } from '../../src/schedule';
 import type { AppState, DesktopBridge } from '../../src/shared';
 
 test('today-centered calendar selects dates and renders structured times and readable sources at desktop and mobile sizes', async () => {
@@ -38,7 +38,7 @@ test('today-centered calendar selects dates and renders structured times and rea
     localAccount: { id: 'test', nickname: '测试账号' },
     groups: [{ id: 'test-group', name: '校园招聘信息交流群', followed: true, messageCount: 4, memberCount: 168, maxMembers: 500 }] };
   try {
-    await page.addInitScript(({ state, activities, sources, status, information }) => {
+    await page.addInitScript(({ state, activities, sources, status, details, information }) => {
       const requests: ScheduleQuery[] = [], links: string[] = [];
       Object.assign(window, { calendarRequests: requests, calendarLinks: links });
       window.desktop = {
@@ -49,10 +49,10 @@ test('today-centered calendar selects dates and renders structured times and rea
             && (!query.search || item.title.includes(query.search))), undated: [], sources };
         },
         activity: async (id: string) => ({ activity: activities.find(item => item.id === id)!, sources: sources[id] }),
-        processingStatus: async () => status, information: async () => information,
+        processingStatus: async () => status, processingDetails: async () => details, information: async () => information,
         openExternal: async (url: string) => { links.push(url); },
       } as unknown as DesktopBridge;
-    }, { state, activities, sources, status: emptyProcessingStatus, information: emptyInformationPage });
+    }, { state, activities, sources, status: emptyProcessingStatus, details: emptyProcessingDetails, information: emptyInformationPage });
     await page.goto(server.resolvedUrls!.local[0]);
     await page.getByRole('button', { name: '日程', exact: true }).click();
     await expect(page.getByText('时间未定时，请查看原始消息', { exact: true })).toHaveCount(0);
@@ -86,14 +86,23 @@ test('today-centered calendar selects dates and renders structured times and rea
       await page.getByRole('heading', { name: '日程', exact: true }).scrollIntoViewIfNeeded();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await expect(dates.nth(3)).toBeVisible();
-      const processingBox = await page.getByRole('region', { name: '消息处理', exact: true }).boundingBox();
+      await expect(page.getByRole('region', { name: '日程同步', exact: true })).toHaveCount(0);
+      const syncButton = await page.getByRole('button', { name: '开始同步', exact: true }).boundingBox();
       const calendarBox = await page.getByRole('group', { name: '七天日期' }).boundingBox();
-      expect(processingBox!.y + processingBox!.height).toBeLessThan(calendarBox!.y);
+      expect(syncButton!.y + syncButton!.height).toBeLessThan(calendarBox!.y);
       expect(calendarBox!.height).toBeLessThanOrEqual(width <= 760 ? 108 : 122);
       for (const date of await dates.all()) {
         expect(await date.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       }
       await page.screenshot({ path: `test-results/calendar-table-${width}.png` });
+      if (width <= 375) {
+        await page.getByRole('button', { name: '开始同步', exact: true }).click();
+        const syncDialog = page.getByRole('dialog');
+        await expect(syncDialog).toBeVisible();
+        expect(await syncDialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await syncDialog.screenshot({ path: `test-results/schedule-sync-${width}.png` });
+        await syncDialog.getByRole('button', { name: '关闭同步详情', exact: true }).click();
+      }
       const scroll = page.getByRole('region', { name: '当日活动表格，可横向滚动' });
       await scroll.evaluate(element => { element.scrollLeft = element.scrollWidth; });
       await expect(table.getByRole('link', { name: sourceLink, exact: true })).toBeVisible();

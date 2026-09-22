@@ -11,7 +11,7 @@ import { ModelSettingsStore, modelConfigInputSchema } from './core/models/model-
 import { getModelCatalog, testPiModel } from './core/models/pi-model';
 import { ScheduleStore } from './core/processing/schedule-store';
 import { DailyScheduleProcessor, DailyScheduleStore, extractDailyActivities } from './core/processing/daily-extraction/index';
-import { informationQuerySchema, processingConfigSchema, scheduleQuerySchema } from './core/processing/activity-schema';
+import { informationQuerySchema, processingConfigSchema, processingDetailsQuerySchema, scheduleQuerySchema } from './core/processing/activity-schema';
 import { emptyInformationPage } from '../src/schedule';
 import { z } from 'zod';
 import type { AppState } from '../src/shared';
@@ -172,6 +172,9 @@ app.whenReady().then(async () => {
     return archiveAccountId ? scheduleStore!.detail(archiveAccountId, id) : null;
   });
   ipcMain.handle('chancekit:schedule:status', event => { verifySender(event); return processor!.status(); });
+  ipcMain.handle('chancekit:schedule:processing-details', (event, input) => {
+    verifySender(event); return processor!.details(processingDetailsQuerySchema.parse(input));
+  });
   ipcMain.handle('chancekit:information:list', (event, input) => {
     verifySender(event);
     const query = informationQuerySchema.parse(input);

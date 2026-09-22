@@ -28,6 +28,7 @@ const bridge: DesktopBridge = {
   recruitingInformation: query => ipcRenderer.invoke('chancekit:information:list', query),
   informationDetail: key => ipcRenderer.invoke('chancekit:information:detail', key),
   processingStatus: () => ipcRenderer.invoke('chancekit:schedule:status'),
+  processingDetails: query => ipcRenderer.invoke('chancekit:schedule:processing-details', query),
   configureProcessing: value => ipcRenderer.invoke('chancekit:schedule:configure', value),
   retryProcessing: key => ipcRenderer.invoke('chancekit:schedule:retry', key),
 };
