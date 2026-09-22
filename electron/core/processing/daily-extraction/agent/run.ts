@@ -15,18 +15,16 @@ import type { DailyActivityOutput, DailyExtractedActivity, DailyExtractionOption
 export { parseDailyTextSubmission } from './structured-output';
 
 const MAX_PROMPT_CHARS = 600_000;
+const MIN_PROMPT_CHARS = 16_000;
 const INPUT_CONTEXT_SHARE = 0.65;
 const CONTEXT_SAFETY_TOKENS = 2_048;
-
-function sourceSize(source: PreparedDailySource) {
-  return source.text.length + source.extractedContent.length + source.links.reduce((sum, link) => sum + link.url.length, 0) + 300;
-}
 
 export function dailyPromptCharBudget(config: StoredModelSettings['config']): number {
   const contextShare = Math.floor(config.contextWindow * INPUT_CONTEXT_SHARE);
   const hardLimit = Math.max(1, config.contextWindow - config.maxTokens - CONTEXT_SAFETY_TOKENS);
+  if (hardLimit < MIN_PROMPT_CHARS) throw new Error('模型上下文配置不足以整理日程，请提高上下文窗口或降低最大输出。');
   // One character per token is deliberately conservative for Chinese-heavy QQ messages.
-  return Math.max(1, Math.min(MAX_PROMPT_CHARS, contextShare, hardLimit));
+  return Math.min(MAX_PROMPT_CHARS, contextShare, hardLimit);
 }
 
 function assistantText(messages: AgentMessage[]): string[] {
@@ -35,14 +33,19 @@ function assistantText(messages: AgentMessage[]): string[] {
     : []);
 }
 
-export function splitDailySources(sources: PreparedDailySource[], maxChars = MAX_PROMPT_CHARS): PreparedDailySource[][] {
+export function splitDailySources(sources: PreparedDailySource[], maxChars = MAX_PROMPT_CHARS, sourceDay = '2000-01-01'): PreparedDailySource[][] {
   const chunks: PreparedDailySource[][] = [];
   let current: PreparedDailySource[] = [];
-  let size = 0;
+  const envelopeSize = JSON.stringify(buildDailyPromptPayload(sourceDay, [])).length;
+  let size = envelopeSize;
   for (const source of sources) {
-    const next = sourceSize(source);
-    if (current.length && (size + next > maxChars || current.length >= 180)) { chunks.push(current); current = []; size = 0; }
-    current.push(source); size += next;
+    const next = JSON.stringify(buildDailyPromptPayload(sourceDay, [source]).sources[0]).length;
+    if (envelopeSize + next > maxChars) throw new Error(`来源 ${source.ref} 的可读内容超过模型上下文预算，请提高上下文窗口。`);
+    if (current.length && (size + next + 1 > maxChars || current.length >= 180)) {
+      chunks.push(current); current = []; size = envelopeSize;
+    }
+    size += next + (current.length ? 1 : 0);
+    current.push(source);
   }
   if (current.length) chunks.push(current);
   return chunks;
@@ -136,7 +139,7 @@ export async function extractDailyActivities(
     sources = await buildDailySources(job.messages, settings, runOptions);
     const activities: DailyExtractedActivity[] = [];
     const promptBudget = dailyPromptCharBudget(settings.config);
-    for (const chunk of splitDailySources(sources, promptBudget)) {
+    for (const chunk of splitDailySources(sources, promptBudget, job.sourceDay)) {
       const extracted = await extractChunkWithinOutputLimit(job.sourceDay, chunk, settings, runOptions);
       activities.push(...extracted);
     }

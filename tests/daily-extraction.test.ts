@@ -443,8 +443,13 @@ test('links are classified before reading and oversized days split in stable sou
     ref, message, contentHash: `hash-${ref}`, groupName: '测试群', displayTime: '2026-09-21 12:00:00',
     text: 'x'.repeat(80), extractedContent: '', links: [], materials: [], warnings: [],
   }));
-  assert.deepEqual(splitDailySources(sources, 500).map(chunk => chunk.map(source => source.ref)), [[1], [2], [3]]);
+  const sourceDay = '2026-09-21';
+  const twoSourceSize = JSON.stringify(buildDailyPromptPayload(sourceDay, sources.slice(0, 2))).length;
+  assert.deepEqual(splitDailySources(sources, twoSourceSize - 1, sourceDay).map(chunk => chunk.map(source => source.ref)), [[1], [2], [3]]);
   assert.equal(dailyPromptCharBudget(defaultModelConfig), 600_000);
+  const oneSourceSize = JSON.stringify(buildDailyPromptPayload(sourceDay, sources.slice(0, 1))).length;
+  assert.throws(() => splitDailySources(sources.slice(0, 1), oneSourceSize - 1, sourceDay), /超过模型上下文预算/);
+  assert.throws(() => dailyPromptCharBudget({ ...defaultModelConfig, contextWindow: 1024, maxTokens: 1024 }), /上下文配置不足/);
 });
 
 test('daily agent exposes only source-reading tools and link reader stays within source evidence', async () => {
