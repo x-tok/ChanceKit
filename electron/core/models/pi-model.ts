@@ -46,6 +46,7 @@ interface PiAgentOptions {
   signal?: AbortSignal;
   systemPrompt?: string;
   timeoutMs?: number;
+  requireToolCall?: boolean;
 }
 
 export function createConfiguredPiAgent(settings: StoredModelSettings, options: PiAgentOptions = {}): Agent {
@@ -87,8 +88,12 @@ export function createConfiguredPiAgent(settings: StoredModelSettings, options: 
         ? AbortSignal.any([options.signal, streamOptions.signal]) : options.signal ?? streamOptions?.signal,
       maxTokens: config.maxTokens,
       temperature: config.reasoning ? undefined : config.temperature,
+      ...(options.requireToolCall && context.tools?.length ? {
+        // Provider adapters use different names for the same "call one of these tools" constraint.
+        toolChoice: config.api === 'anthropic-messages' || config.api === 'google-generative-ai' ? 'any' : 'required',
+      } : {}),
       maxRetries: 0, timeoutMs: options.timeoutMs ?? 30_000, transport: 'sse', cacheRetention: 'none',
-    }),
+    } as Parameters<typeof api.streamSimple>[2]),
   });
 }
 

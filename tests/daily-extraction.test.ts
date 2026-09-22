@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 import { Store, normalizeMessage } from '../electron/core/archive/store';
 import { ScheduleStore } from '../electron/core/processing/schedule-store';
 import { DailyScheduleStore, beijingSourceDay } from '../electron/core/processing/daily-extraction/queue/store';
 import { classifySourceLink } from '../electron/core/processing/daily-extraction/agent/link-classifier';
 import { buildDailyPromptPayload } from '../electron/core/processing/daily-extraction/agent/prompt';
-import { humanMaterialText, humanMessageText } from '../electron/core/processing/daily-extraction/agent/source-builder';
-import { splitDailySources } from '../electron/core/processing/daily-extraction/agent/run';
+import { buildDailySources, humanMaterialText, humanMessageText } from '../electron/core/processing/daily-extraction/agent/source-builder';
+import { extractDailyActivities, parseDailyTextSubmission, splitDailySources } from '../electron/core/processing/daily-extraction/agent/run';
 import { sameRecruitingEvent } from '../electron/core/processing/daily-extraction/dedupe';
 import { DailyScheduleProcessor } from '../electron/core/processing/daily-extraction/queue/processor';
 import { createReadSourceLinksTool } from '../electron/core/processing/daily-extraction/agent/tools/read-source-links';
@@ -166,6 +168,51 @@ test('agent submission becomes a validated JSON array', () => {
   assert.deepEqual(output, [{ ...activity, sourceRefs: [1] }]);
   assert.throws(() => parseDailySubmission({ activities: [{ ...activity, startDate: '9月24日', sourceRefs: [1] }] }, new Set([1])), /日期/);
   assert.throws(() => parseDailySubmission({ activities: [{ ...activity, sourceRefs: [2] }] }, new Set([1])), /批次之外/);
+});
+
+test('JSON text responses use the same strict structured-result validation', () => {
+  const message = normalizeMessage(sample(10, '结构化结果测试'), 'a');
+  const sources: PreparedDailySource[] = [{
+    ref: 1, message, contentHash: 'hash', groupName: '测试群', displayTime: '2026-09-21 12:00:00',
+    text: message.text, extractedContent: '', materials: [], warnings: [],
+    links: [{ url: 'https://jobs.example.com/campus/apply', kind: 'registration' }],
+  }];
+  assert.deepEqual(parseDailyTextSubmission(`\`\`\`json\n${JSON.stringify([{ ...activity, sourceRefs: [1] }])}\n\`\`\``, sources),
+    [{ ...activity, sourceRefs: [1] }]);
+  assert.equal(parseDailyTextSubmission(JSON.stringify([{ ...activity, startDate: '9月24日', sourceRefs: [1] }]), sources), undefined);
+  assert.equal(parseDailyTextSubmission(JSON.stringify([{ ...activity, sourceRefs: [2] }]), sources), undefined);
+});
+
+test('daily extraction forces a validated submit tool call after an unstructured response', async t => {
+  const bodies: Record<string, any>[] = [];
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    bodies.push(body);
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    if (bodies.length === 1) {
+      response.write(`data: ${JSON.stringify({ id: 'first', choices: [{ index: 0, delta: { role: 'assistant', content: '我已经整理好了。' }, finish_reason: 'stop' }] })}\n\n`);
+    } else {
+      response.write(`data: ${JSON.stringify({ id: 'final', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'submit_daily_activities', arguments: JSON.stringify({ activities: [{ ...activity, sourceRefs: [1] }] }) } }] }, finish_reason: 'tool_calls' }] })}\n\n`);
+    }
+    response.end('data: [DONE]\n\n');
+  });
+  endpoint.listen(0, '127.0.0.1');
+  await once(endpoint, 'listening');
+  t.after(async () => { endpoint.closeAllConnections(); await new Promise<void>(resolve => endpoint.close(() => resolve())); });
+  const message = normalizeMessage({ ...sample(10, `${activity.title}\n${activity.evidence}`), time: Date.parse('2026-09-21T04:00:00Z') / 1000 }, 'a');
+  const job: DailyProcessingJob = { key: 'a:2026-09-21', accountId: 'a', sourceDay: '2026-09-21', hash: 'hash', attempts: 1,
+    messages: [{ ref: 1, message, contentHash: 'hash', groupName: '测试群' }] };
+  const result = await extractDailyActivities(job, {
+    config: { ...defaultModelConfig, provider: 'custom', modelId: 'test-model', reasoning: false,
+      baseUrl: `http://127.0.0.1:${(endpoint.address() as { port: number }).port}/v1` },
+    apiKey: 'test-key', updatedAt: new Date().toISOString(),
+  }, { signal: new AbortController().signal });
+  assert.deepEqual(result.activities, [{ ...activity, registrationUrl: null, sourceRefs: [1] }]);
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[1].tool_choice, 'required');
+  assert.deepEqual(bodies[1].tools.map((tool: any) => tool.function.name), ['submit_daily_activities']);
 });
 
 test('processing details separate pending, running and completed messages and retain the JSON result', async t => {
