@@ -4,7 +4,7 @@
 
 ## 开发与验证
 
-使用 Node.js 24 或更新版本。在仓库根目录执行 `npm ci` 和 `npm run prepare:napcat`，然后按 [README](README.md) 运行开发环境。
+使用 Node.js 24 或更新版本。在仓库根目录执行 `npm ci` 和 `npm run prepare:napcat`，然后按[开发与构建](docs/development.md)运行开发环境。
 
 提交前运行：
 
@@ -42,7 +42,7 @@ git diff --cached
 
 NapCat ZIP 由构建前准备步骤下载和校验，不提交到源码仓库。不要用自己的 NapCat 运行目录、QQ 安装副本或已登录配置制作分发组件。公开反馈、PR 描述和构建附件同样需要检查敏感信息。
 
-公开发布包含 NapCatQQ 的安装包前，必须确认仓库已经记录适用于该版本和分发方式的书面授权，并附带 `LICENSE`、`PRIVACY.md`、`DISCLAIMER.md`、`THIRD_PARTY_NOTICES.md` 及 NapCatQQ 原始许可证。第三方组件不能被重新授权为 ChanceKit 的许可证。
+公开发布包含 NapCatQQ 的安装包前，应核对[第三方许可说明](THIRD_PARTY_NOTICES.md)中的再分发条件，附带完整许可证、来源和版权信息，以及 `LICENSE`、`PRIVACY.md`、`DISCLAIMER.md`、`THIRD_PARTY_NOTICES.md` 及 NapCatQQ 原始许可证。第三方组件不能被重新授权为 ChanceKit 的许可证。
 
 ## 兼容性与打包
 
