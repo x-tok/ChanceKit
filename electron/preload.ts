@@ -31,5 +31,11 @@ const bridge: DesktopBridge = {
   processingDetails: query => ipcRenderer.invoke('chancekit:schedule:processing-details', query),
   configureProcessing: value => ipcRenderer.invoke('chancekit:schedule:configure', value),
   retryProcessing: key => ipcRenderer.invoke('chancekit:schedule:retry', key),
+  jobChatOverview: () => ipcRenderer.invoke('chancekit:job-chat:overview'),
+  jobChatSession: sessionId => ipcRenderer.invoke('chancekit:job-chat:session', sessionId),
+  jobChatResult: ref => ipcRenderer.invoke('chancekit:job-chat:result', ref),
+  sendJobChat: input => ipcRenderer.invoke('chancekit:job-chat:send', input),
+  cancelJobChat: sessionId => ipcRenderer.invoke('chancekit:job-chat:cancel', sessionId),
+  deleteJobChat: sessionId => ipcRenderer.invoke('chancekit:job-chat:delete', sessionId),
 };
 contextBridge.exposeInMainWorld('desktop', bridge);

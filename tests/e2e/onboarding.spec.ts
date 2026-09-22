@@ -59,6 +59,12 @@ test('first-run onboarding completes QQ, DeepSeek and bounded group sync', async
         processingDetails: async () => emptyProcessingDetails,
         configureProcessing: async value => { processingConfigs.push(value); return emptyProcessingStatus; },
         retryProcessing: async () => emptyProcessingStatus,
+        jobChatOverview: async () => ({ sessions: [], dataset: { information: 0, incomplete: 0, followedGroups: 0 } }),
+        jobChatSession: async () => null,
+        jobChatResult: async () => null,
+        sendJobChat: async () => { throw new Error('onboarding preview does not provide chat'); },
+        cancelJobChat: async () => {},
+        deleteJobChat: async () => false,
       } as DesktopBridge;
     }, { initial, groups, defaultModelConfig, emptyProcessingStatus, emptyProcessingDetails, emptyInformationPage });
     await page.goto(server.resolvedUrls!.local[0]);

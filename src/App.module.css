@@ -173,7 +173,7 @@
   .brandSubtitle { order: 1; flex-basis: 100%; margin-top: 0; }
   .brand small, .navBottom { display: none; }
   .brandMark { width: 29px; height: 29px; border: none; }
-  .navigation nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; order: 2; gap: 4px; }
+  .navigation nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; order: 2; gap: 4px; }
   .navigation nav button { min-height: 40px; padding: 8px 5px; gap: 5px; font-size: 12px; justify-content: center; }
   .navigation nav small { display: none; }
   .main { flex: 1; }
