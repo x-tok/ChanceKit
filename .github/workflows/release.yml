@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       prerelease:
-        description: Mark this release as a pre-release
+        description: Publish as a pre-release instead of the Latest release
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read

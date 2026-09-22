@@ -26,7 +26,7 @@ Windows 安装器暂未签名，可能显示 SmartScreen 提示；确认来源�
 
 1. 将待发布代码推送到 `main`。发布新版本时，在开发环境执行 `npm version 0.1.1 --no-git-tag-version`（替换成实际版本），审查并提交两个 package 文件；不要提前创建同名 tag。
 2. 打开 [Actions → Release ChanceKit](https://github.com/x-tok/ChanceKit/actions/workflows/release.yml)，点击 **Run workflow**，选择 `main`。
-3. 默认勾选 **Mark this release as a pre-release**。正式版取消勾选；带 `-beta.1` 等后缀的版本必须保留勾选。
+3. 默认不勾选 **Publish as a pre-release instead of the Latest release**，发布后会成为 Latest。只有预览版才勾选；带 `-beta.1` 等后缀的版本必须勾选。
 4. 点击运行。版本来自所选提交，所有任务都构建该次触发固定的提交 SHA。普通 push、tag 和 Pull Request 不触发此工作流。
 5. 等待三个平台任务及发布任务完成，从运行摘要或 Releases 页面取得下载链接。正式版标记为 Latest，预览版不会替换 Latest。
 
