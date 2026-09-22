@@ -70,7 +70,7 @@
 
 预设目录在浏览器预览和桌面端保持一致，协议适配使用固定版本的 pi-ai。DeepSeek V4.1 Flash 的 ID、上下文和图像能力依据 [DeepSeek 官方模型文档](https://api-docs.deepseek.com/quick_start/pricing) 补充，推理参数依据 [官方思考模式文档](https://api-docs.deepseek.com/guides/thinking_mode) 映射。
 
-可以配置上下文窗口、最大输出、温度、推理强度和图像能力。“测试连接”通过真实 pi agent 发出一条固定测试消息，不读取 QQ 消息，可能产生少量 API 费用；可取消，30 秒超时。测试使用当前表单但不会自动保存。
+可以配置上下文窗口、最大输出、温度、推理强度和图像能力。DeepSeek V4.1 Flash 默认使用 1M 上下文和 32K 最大输出；日程整理最多使用 60 万字符的日批次输入，并为链接工具返回、推理与最终 JSON 预留上下文。“测试连接”通过真实 pi agent 发出一条固定测试消息，不读取 QQ 消息，可能产生少量 API 费用；可取消，30 秒超时。测试使用当前表单但不会自动保存。
 
 API Key 由 Electron `safeStorage` 加密，只在主进程使用；页面不会回填已保存的密钥。更改服务商、协议或 API 地址后需重新填写密钥，避免旧密钥发往其他服务。系统加密不可用时拒绝保存，不退回明文。浏览器仅提供表单预览，不保存密钥或调用模型。
 
@@ -185,6 +185,8 @@ npm run dev
 
 `npm run dev` 启动 Vite 和 Electron，开发界面默认端口为 5178，占用时自动换端口；连接 QQ 仍需在 GUI 中主动操作。仅查看界面可运行 `npm run dev:web`，浏览器预览没有 QQ 接入能力。
 
+需要从首次设置开始重新测试时，先退出开发版见机，再执行 `npm run clean:dev-data`。该命令只删除仓库内的 `.dev-data/`，包括见机的消息库、设置状态、模型配置、Electron 缓存和本应用创建的 QQ 运行副本；不会删除官方 QQ 的应用或原聊天数据。
+
 `dev`、`start` 和 `test:e2e` 会先检查 Electron 运行文件，缺失时调用官方安装器下载并校验，代理选择与 NapCat 下载一致。也可单独执行 `npm run prepare:electron`。安装包已缓存或运行文件已就绪时会直接复用，不需要删除 `node_modules` 或重装全部依赖。
 
 ### NapCat 如何随包分发
@@ -217,6 +219,7 @@ npm run prepare:napcat
 | `npm ci` | 按 lockfile 安装依赖 |
 | `npm run prepare:napcat` | 获取或验证固定版官方 NapCat ZIP |
 | `npm run prepare:electron` | 使用代理配置检查或安装 Electron 运行文件 |
+| `npm run clean:dev-data` | 清除源码开发版的本地数据和缓存 |
 | `npm run dev` | 启动桌面开发环境 |
 | `npm run dev:web` | 仅启动浏览器界面预览 |
 | `npm run typecheck` | TypeScript 检查 |
