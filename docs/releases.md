@@ -1,5 +1,20 @@
 # 安装与发布
 
+[返回首页](../README.md) · [文档目录](README.md)
+
+> 安装包内置的 NapCatQQ 适用其受限非商业再分发许可证，并随包提供完整许可证、来源和版权信息。详见[第三方许可说明](../THIRD_PARTY_NOTICES.md)。
+
+## 平台与验证状态
+
+| 平台 | 验证状态 |
+| --- | --- |
+| macOS Apple Silicon | 已验证本机 QQ 接入和开发构建；正式签名、公证与干净机器安装验收待完成 |
+| macOS Intel | 尚未进行实机验证 |
+| Windows 10 / 11 x64 | 已实现启动集成与 NSIS 打包配置；真实 QQ 登录、退出和兼容性待验收 |
+| Linux | 不支持本机 QQ 自动启动 |
+
+请先自行安装[官方 QQ](https://im.qq.com/)。macOS 首次准备运行副本需要额外约 1 GB 空间，聊天记录和附件引用也会占用空间。
+
 ## 下载与安装
 
 在 [Releases](https://github.com/x-tok/ChanceKit/releases) 中选择版本，展开 **Assets** 下载。预览版带有 **Pre-release** 标记，适合先行体验；自动生成的 `Source code` 是源码，不是安装包。
@@ -13,6 +28,8 @@
 | `SHA256SUMS.txt` | 上述五个文件的 SHA-256 校验值 |
 
 安装包包含固定版本 NapCat；用户不需要另行从 GitHub 下载组件。官方 QQ 需要自行安装。macOS 打开 DMG 后将见机拖入“应用程序”，Windows 双击安装器按提示安装。
+
+通过图形界面即可完成配置，不需要 Node.js、终端或手动编辑配置文件。
 
 ### 未正式签名的安装包
 
@@ -29,6 +46,7 @@ Windows 安装器暂未签名，可能显示 SmartScreen 提示；确认来源�
 3. 默认不勾选 **Publish as a pre-release instead of the Latest release**，发布后会成为 Latest。只有预览版才勾选；带 `-beta.1` 等后缀的版本必须勾选。
 4. 点击运行。版本来自所选提交，所有任务都构建该次触发固定的提交 SHA。普通 push、tag 和 Pull Request 不触发此工作流。
 5. 等待三个平台任务及发布任务完成，从运行摘要或 Releases 页面取得下载链接。正式版标记为 Latest，预览版不会替换 Latest。
+6. 新版本公开后，同步更新 README 中的下载版本号与三个按钮链接。链接中的 tag 和安装包文件名必须对应同一已发布版本，并逐一检查附件是否可下载。
 
 工作流在 GitHub 托管的全新 macOS/Windows 环境执行 `npm ci`，下载并验证清单固定的 NapCat ZIP，构建、运行模拟测试和打包。打包后再次核对应用入口、版本、NapCat 清单与 ZIP 摘要，macOS 还校验 ad-hoc 签名。不会安装、登录真实 QQ，也不会读取维护者电脑上的数据。
 
@@ -41,4 +59,4 @@ Windows 安装器暂未签名，可能显示 SmartScreen 提示；确认来源�
 - 同名 Release（包括草稿）或 tag 已存在时，会拒绝重复发布。这个规则也意味着成功后点击“重新运行”不会替换原包。
 - 若 GitHub 禁用了 Actions 或组织策略禁止写入 Releases，需要仓库管理员调整平台设置；不需要在应用内配置这些权限。
 
-当前工作流不提供应用内自动更新。用户下载新版安装包安装；现有本地数据保留规则见 README。
+当前工作流不提供应用内自动更新。用户下载新版安装包安装；现有本地数据保留规则见[更新与数据保留](data-and-privacy.md#更新与数据保留)。
