@@ -1,6 +1,5 @@
 import type { StoredModelSettings } from '../../../models/model-settings';
 import { collectMessageMaterials } from '../../../materials/message-materials';
-import { normalizeMaterialImage } from '../../../materials/material-image';
 import { readVisualMaterials } from '../../../materials/visual-materials';
 import { classifiedLinks } from './link-classifier';
 import type { DailyExtractionOptions, DailyMessageSource, PreparedDailySource } from '../types';
@@ -67,17 +66,8 @@ async function prepareSource(source: DailyMessageSource, settings: StoredModelSe
       return options.resolveAttachment!(origin.messageKey, origin.index, childSignal);
     } : undefined,
     {
+      readLinkedPages: false,
       sourceLabel: index => origins[index]?.messageKey === source.message.key ? `来源 ${source.ref}` : `来源 ${source.ref} 的引用原消息`,
-      readWebpagePdf: options.readWebpagePdf ? (input, childSignal, consumePages) =>
-        options.readWebpagePdf!(source.message.key, input, childSignal, consumePages) : undefined,
-      readPdfVisuals: async (pages, label) => {
-        const groups = [];
-        for (const page of pages) {
-          const normalized = await normalizeMaterialImage(page.bytes, 2, signal);
-          groups.push({ label: `${label} · 第 ${page.pageNumber} 页`, images: normalized.images });
-        }
-        return readVisualMaterials(groups, settings, { signal, fetch: options.fetch, accountId: source.message.accountId, repairBudget });
-      },
     },
   );
   if (material.imageGroups.length) {

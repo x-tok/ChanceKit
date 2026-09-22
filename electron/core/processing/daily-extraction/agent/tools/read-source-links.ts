@@ -8,9 +8,11 @@ import type { DailyExtractionOptions, PreparedDailySource } from '../../types';
 import { classifySourceLink, sourceLinkLabel } from '../link-classifier';
 
 const MAX_REQUESTS_PER_CALL = 4;
-const MAX_READS_PER_CHUNK = 8;
+const MAX_READS_PER_CHUNK = 12;
 const MAX_PAGE_TEXT = 12_000;
 const MAX_PAGE_IMAGES = 6;
+const LINK_READ_CONCURRENCY = 4;
+const PAGE_IMAGE_CONCURRENCY = 3;
 
 const parameters = Type.Object({
   requests: Type.Array(Type.Object({
@@ -28,27 +30,42 @@ function normalizedUrl(value: string) {
   return publicMaterialUrl(value).href;
 }
 
+async function mapConcurrent<T, R>(values: T[], concurrency: number, operation: (value: T) => Promise<R>): Promise<R[]> {
+  const output = new Array<R>(values.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < values.length) {
+      const index = cursor++;
+      output[index] = await operation(values[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
+  return output;
+}
+
 async function readPageImages(
   urls: string[], label: string, source: PreparedDailySource, settings: StoredModelSettings,
   options: DailyExtractionOptions, signal: AbortSignal,
 ) {
   if (!urls.length) return { text: '', warnings: [] as string[] };
   if (!settings.config.imageInput) return { text: '', warnings: ['当前模型未开启图片读取能力，页面图片未读取。'] };
-  const images = [];
-  const warnings: string[] = [];
   const download = options.download ?? downloadPublicMaterial;
-  for (const url of urls.slice(0, MAX_PAGE_IMAGES)) {
+  const results = await mapConcurrent(urls.slice(0, MAX_PAGE_IMAGES), PAGE_IMAGE_CONCURRENCY, async url => {
     try {
       const data = await download(url, signal);
-      if (!imageMime(data.bytes) && !/^image\//i.test(data.contentType)) continue;
+      if (!imageMime(data.bytes) && !/^image\//i.test(data.contentType)) return { images: [], warnings: [] as string[] };
       const normalized = await normalizeMaterialImage(data.bytes, 2, signal);
-      images.push(...normalized.images);
-      if (normalized.truncated) warnings.push(`图片 ${url} 仅抽取了部分画面。`);
+      return {
+        images: normalized.images,
+        warnings: normalized.truncated ? [`图片 ${url} 仅抽取了部分画面。`] : [],
+      };
     } catch {
       signal.throwIfAborted();
-      warnings.push(`图片 ${url} 未能读取。`);
+      return { images: [], warnings: [`图片 ${url} 未能读取。`] };
     }
-  }
+  });
+  const images = results.flatMap(result => result.images);
+  const warnings = results.flatMap(result => result.warnings);
   if (!images.length) return { text: '', warnings };
   const visual = await readVisualMaterials([{ label, images }], settings, {
     signal, fetch: options.fetch, accountId: source.message.accountId, repairBudget: { used: 0 },
@@ -120,30 +137,32 @@ export function createReadSourceLinksTool(
   let remaining = MAX_READS_PER_CHUNK;
   return {
     name: 'read_source_links', label: '读取来源链接',
-    description: 'Read supplied public source URLs and relevant child links discovered in those pages. Use only when the supplied extracted content is missing or incomplete.',
+    description: 'Concurrently read supplied public source URLs and relevant child links discovered in those pages. Batch independent URLs in one call.',
     parameters, executionMode: 'sequential' as const,
     async execute(_id: string, input: { requests: { sourceRef: number; url: string }[] }, toolSignal?: AbortSignal) {
       const signal = toolSignal ? AbortSignal.any([options.signal, toolSignal]) : options.signal;
       signal.throwIfAborted();
       if (input.requests.length > remaining) throw new Error(`本批次最多还可读取 ${remaining} 个链接。`);
       remaining -= input.requests.length;
-      const output: string[] = [];
-      for (const request of input.requests) {
-        signal.throwIfAborted();
+      const requests = input.requests.map(request => {
         const item = access.get(request.sourceRef);
         if (!item) throw new Error('链接引用了当前批次之外的来源。');
         const url = normalizedUrl(request.url);
         const depth = item.urls.get(url);
         if (depth === undefined) throw new Error('只能读取原消息中的链接，或已读取页面正文中发现的下一层链接。');
         acceptedLinks.add(url);
+        return { item, url, depth };
+      });
+      const output = await mapConcurrent(requests, LINK_READ_CONCURRENCY, async ({ item, url, depth }) => {
+        signal.throwIfAborted();
         try {
-          output.push(await readAllowedLink(url, depth, item.source, item, acceptedLinks, settings, options, signal));
+          return await readAllowedLink(url, depth, item.source, item, acceptedLinks, settings, options, signal);
         } catch (error) {
           signal.throwIfAborted();
           const reason = error instanceof Error ? error.message.replace(/https?:\/\/\S+/g, '[链接]').slice(0, 240) : '网页读取失败。';
-          output.push(`来源 ${request.sourceRef} · 链接读取失败\n网址：${url}\n原因：${reason}`);
+          return `来源 ${item.source.ref} · 链接读取失败\n网址：${url}\n原因：${reason}`;
         }
-      }
+      });
       return { content: [{ type: 'text' as const, text: output.join('\n\n---\n\n') }], details: { read: input.requests.length } };
     },
   };

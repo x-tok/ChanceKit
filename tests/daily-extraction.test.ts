@@ -316,6 +316,54 @@ test('daily agent exposes two focused tools and link reader stays within source 
   assert.deepEqual(calls, ['https://example.com/jobs', 'https://example.com/apply']);
 });
 
+test('daily source preparation leaves webpage reads to the agent tool', async () => {
+  const message = normalizeMessage(sample(10, '招聘详情 https://example.com/news'), 'a');
+  let downloads = 0;
+  const sources = await buildDailySources(
+    [{ ref: 1, message, contentHash: 'hash', groupName: '测试群' }],
+    { config: { ...defaultModelConfig, imageInput: false }, apiKey: 'test-key', updatedAt: '' },
+    {
+      signal: new AbortController().signal,
+      download: async url => {
+        downloads++;
+        return { url, contentType: 'text/html', bytes: new TextEncoder().encode('<p>不应预读取</p>') };
+      },
+    },
+  );
+  assert.equal(downloads, 0);
+  assert.deepEqual(sources[0].links, [{ url: 'https://example.com/news', kind: 'webpage' }]);
+  assert.equal(sources[0].extractedContent.includes('不应预读取'), false);
+});
+
+test('link reader fetches independent requests concurrently and preserves request order', async () => {
+  const message = normalizeMessage(sample(10, '批量链接'), 'a');
+  const links = [1, 2, 3, 4].map(index => ({ url: `https://example.com/jobs/${index}`, kind: 'webpage' as const }));
+  const source: PreparedDailySource = {
+    ref: 1, message, contentHash: 'hash', groupName: '测试群', displayTime: '2026-09-21 12:00:00',
+    text: message.text, extractedContent: '', materials: [], warnings: [], links,
+  };
+  let active = 0;
+  let peak = 0;
+  const tool = createReadSourceLinksTool([source], {
+    config: { ...defaultModelConfig, imageInput: false }, apiKey: 'test-key', updatedAt: '',
+  }, {
+    signal: new AbortController().signal,
+    download: async url => {
+      active++;
+      peak = Math.max(peak, active);
+      try {
+        await new Promise(resolve => setTimeout(resolve, 20));
+        return { url, contentType: 'text/html; charset=utf-8', bytes: new TextEncoder().encode(`<p>${url}</p>`) };
+      } finally { active--; }
+    },
+  });
+  const result = await tool.execute('parallel', { requests: links.map(link => ({ sourceRef: 1, url: link.url })) });
+  const text = (result.content[0] as { text: string }).text;
+  assert.equal(peak, 4);
+  const positions = links.map(link => text.indexOf(link.url));
+  assert.equal(positions.every((position, index) => index === 0 || position > positions[index - 1]), true);
+});
+
 test('processor runs different days concurrently while keeping one lease per day', async t => {
   const f = await fixture(t);
   const start = Date.parse('2026-09-19T04:00:00Z') / 1000;

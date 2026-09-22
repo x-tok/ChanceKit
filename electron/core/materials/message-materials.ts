@@ -163,7 +163,7 @@ export async function collectMessageMaterials(
   message: Message, signal: AbortSignal, imageInput: boolean, download: MaterialDownload = downloadPublicMaterial,
   resolveAttachment?: AttachmentResolver,
   options: { onTextReady?: (material: MessageMaterials) => Promise<boolean>; sourceLabel?: (segmentIndex: number) => string;
-    readWebpagePdf?: WebpagePdfReader; readPdfVisuals?: PdfVisualReader } = {},
+    readWebpagePdf?: WebpagePdfReader; readPdfVisuals?: PdfVisualReader; readLinkedPages?: boolean } = {},
 ): Promise<MessageMaterials> {
   const result: MessageMaterials = { text: '', images: [], imageGroups: [], materials: [], warnings: [], allowedLinks: new Set() };
   result.materials.push(...shareCardMaterials(message));
@@ -294,8 +294,9 @@ export async function collectMessageMaterials(
       result.warnings.push(`文件读取失败：${file.name}；${detail}`);
     }
   }
-  if (pages.size > MAX_PAGES) result.warnings.push(`链接超过 ${MAX_PAGES} 个，只读取前 ${MAX_PAGES} 个。`);
-  for (const url of [...pages].slice(0, MAX_PAGES)) {
+  const linkedPages = options.readLinkedPages === false ? [] : [...pages];
+  if (linkedPages.length > MAX_PAGES) result.warnings.push(`链接超过 ${MAX_PAGES} 个，只读取前 ${MAX_PAGES} 个。`);
+  for (const url of linkedPages.slice(0, MAX_PAGES)) {
     signal.throwIfAborted();
     try {
       let data = await download(url, signal);
