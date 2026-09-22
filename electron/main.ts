@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, utilityProcess, Menu, net } from 'electron';
 import { mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
+import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Command } from '../src/shared';
@@ -28,6 +29,7 @@ import { applicationMenuTemplate } from './application-menu';
 app.setName(BRAND.name);
 const profile = process.env.CHANCEKIT_TEST_DATA ? path.resolve(process.env.CHANCEKIT_TEST_DATA)
   : app.isPackaged ? resolveProfileDirectory(app.getPath('appData')) : path.resolve('.dev-data');
+const instancePidFile = path.join(profile, 'chancekit.pid');
 app.setPath('userData', profile);
 if (!app.requestSingleInstanceLock()) app.quit();
 let window: BrowserWindow | undefined;
@@ -60,6 +62,7 @@ function request<T = any>(command: Command | AttachmentRequest | ReplyRequest, s
 app.whenReady().then(async () => {
   const root = app.getPath('userData');
   await mkdir(root, { recursive: true, mode: 0o700 });
+  await writeFile(instancePidFile, String(process.pid), { mode: 0o600 });
   const componentArchive = path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'), 'napcat', RELEASE.archive);
   worker = utilityProcess.fork(path.join(__dirname, 'worker.cjs'), [root, componentArchive], { serviceName: `${BRAND.name}消息服务` });
   const ready = new Promise<void>(resolve => {
@@ -257,6 +260,8 @@ app.whenReady().then(async () => {
   else await window.loadFile(path.join(__dirname, '../dist/index.html'));
   app.on('second-instance', () => { if (window?.isMinimized()) window.restore(); window?.focus(); });
 });
+
+process.on('exit', () => { try { rmSync(instancePidFile, { force: true }); } catch {} });
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
