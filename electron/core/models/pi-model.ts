@@ -1,4 +1,4 @@
-import { Agent } from '@earendil-works/pi-agent-core';
+import { Agent, type AgentMessage } from '@earendil-works/pi-agent-core';
 import type { Model } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
@@ -47,6 +47,9 @@ interface PiAgentOptions {
   systemPrompt?: string;
   timeoutMs?: number;
   samplingParams?: Record<string, unknown>;
+  requireToolCall?: boolean;
+  sessionId?: string;
+  transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 }
 
 export function createConfiguredPiAgent(settings: StoredModelSettings, options: PiAgentOptions = {}): Agent {
@@ -80,6 +83,8 @@ export function createConfiguredPiAgent(settings: StoredModelSettings, options: 
       model, systemPrompt: options.systemPrompt ?? 'You are the ChanceKit assistant.',
       thinkingLevel: config.reasoningLevel, tools: [],
     },
+    sessionId: options.sessionId,
+    transformContext: options.transformContext,
     streamFn: (selectedModel, context, streamOptions) => api.streamSimple(selectedModel, context, {
       ...streamOptions,
       apiKey: apiKey || 'local',
@@ -89,8 +94,12 @@ export function createConfiguredPiAgent(settings: StoredModelSettings, options: 
       maxTokens: config.maxTokens,
       temperature: config.reasoning ? undefined : config.temperature,
       samplingParams: options.samplingParams,
+      ...(options.requireToolCall && context.tools?.length ? {
+        // Provider adapters use different names for the same "call one of these tools" constraint.
+        toolChoice: config.api === 'anthropic-messages' || config.api === 'google-generative-ai' ? 'any' : 'required',
+      } : {}),
       maxRetries: 0, timeoutMs: options.timeoutMs ?? 30_000, transport: 'sse', cacheRetention: 'none',
-    }),
+    } as Parameters<typeof api.streamSimple>[2]),
   });
 }
 

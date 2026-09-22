@@ -2,8 +2,10 @@ import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createHash } from 'node:crypto';
 
+const sampleBaseTime = Math.floor(Date.now() / 1000) - 24 * 60 * 60;
+
 export const sample = (id: number, text: string, groupId = 731234567) => ({
-  time: 1789815600 + id * 60, message_type: 'group', post_type: 'message', self_id: 100010001,
+  time: sampleBaseTime + id * 60, message_type: 'group', post_type: 'message', self_id: 100010001,
   group_id: groupId, message_id: id, message_seq: id, real_seq: String(id + 9000),
   sender: { user_id: 200020002, nickname: '校招信息员（测试）', card: '' },
   message: [{ type: 'text', data: { text } }], raw_message: text,
@@ -52,7 +54,7 @@ export async function mockNapCat() {
       if (action === 'get_group_msg_history') {
         if (params.group_id === '731234569') return socket.send(JSON.stringify({ status: 'failed', retcode: 1200, wording: '消息undefined不存在', echo }));
         if (params.message_seq === '1') {
-          if (completeHistoryAtBoundary) return ok({ messages: [{ ...sample(0, '三天前的范围外消息'), time: 1789732800 }] });
+          if (completeHistoryAtBoundary) return ok({ messages: [{ ...sample(0, '三天前的范围外消息'), time: Math.floor(Date.now() / 1000) - 4 * 24 * 60 * 60 }] });
           return socket.send(JSON.stringify({ status: 'failed', retcode: 1200, wording: '消息1不存在', echo }));
         }
         if (params.message_seq && !params.reverse_order) return ok({ messages: [sample(Number(params.message_seq), '锚点本身'), sample(Number(params.message_seq) + 1, '较新的消息')] });

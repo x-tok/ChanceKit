@@ -4,10 +4,9 @@ import { createConfiguredPiAgent } from '../../../models/pi-model';
 import type { DailyActivityOutput, DailyExtractionOptions, PreparedDailySource } from '../types';
 import { dailyActivityOutputJsonSchema, parseDailySubmission } from './activity-output';
 import { buildDailyPromptPayload, DAILY_EXTRACTION_SYSTEM_PROMPT } from './prompt';
+import { createSubmitDailyActivitiesTool } from './tools/submit-daily-activities';
 
-const MAX_STRUCTURED_ATTEMPTS = 2;
 const UNSUPPORTED_STRUCTURED_OUTPUT = /(?:response.?format|json.?schema|text\.format).*(?:unsupported|unknown|unrecognized|invalid)|(?:unsupported|unknown|unrecognized).*(?:response.?format|json.?schema|text\.format)/i;
-const INCOMPLETE_JSON = /unterminated|string in json|unexpected end|end of json input|eof/i;
 
 export class StructuredOutputTruncatedError extends Error {
   override name = 'StructuredOutputTruncatedError';
@@ -92,45 +91,38 @@ function lastAssistant(messages: AgentMessage[]) {
 
 async function runStructuredSubmission(
   sourceDay: string, sources: PreparedDailySource[], settings: StoredModelSettings, options: DailyExtractionOptions,
-  priorMessages: AgentMessage[], allowedLinks: Set<string>, samplingParams: Record<string, unknown> | undefined, attempts: number,
+  priorMessages: AgentMessage[], allowedLinks: Set<string>,
 ): Promise<DailyActivityOutput> {
   const agent = createConfiguredPiAgent(settings, {
     fetch: options.fetch,
     signal: options.signal,
-    systemPrompt: `${DAILY_EXTRACTION_SYSTEM_PROMPT}\nThis is the final structured-output stage. Return exactly one JSON object matching the supplied JSON Schema. Do not return prose or Markdown.`,
+    systemPrompt: `${DAILY_EXTRACTION_SYSTEM_PROMPT}\nThis is the final submission stage. Call submit_daily_activities now. No other response is accepted.`,
     timeoutMs: 120_000,
-    samplingParams,
+    requireToolCall: true,
   });
+  let captured: DailyActivityOutput | undefined;
+  let turns = 0;
+  agent.state.tools = [createSubmitDailyActivitiesTool(
+    new Set(sources.map(source => source.ref)), allowedLinks, value => { captured = value; },
+  )];
+  agent.shouldStopAfterTurn = () => captured !== undefined || ++turns >= 2;
   const abort = () => agent.abort();
   options.signal.addEventListener('abort', abort, { once: true });
-  let previousDraft = assistantText(priorMessages).at(-1) ?? '';
-  let validationError = '';
   try {
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      await agent.prompt(JSON.stringify({
-        ...buildDailyPromptPayload(sourceDay, sources),
-        supplementalEvidence: boundedToolEvidence(priorMessages),
-        ...(attempt ? {
-          correction: `The previous JSON failed validation: ${validationError}. Correct every reported problem and return the complete JSON object again.`,
-          previousDraft: previousDraft.slice(0, 30_000),
-        } : { priorDraft: previousDraft.slice(0, 30_000) }),
-      }));
-      options.signal.throwIfAborted();
-      const last = lastAssistant(agent.state.messages);
-      if (!last || (last.role === 'assistant' && ['error', 'aborted'].includes(last.stopReason))) {
-        throw new Error(last?.role === 'assistant' ? last.errorMessage || '模型结构化输出请求失败。' : '模型未返回结构化输出。');
-      }
-      if (last.stopReason === 'length') {
-        throw new StructuredOutputTruncatedError('模型结构化输出达到最大长度。');
-      }
-      previousDraft = assistantText([last]).at(-1) ?? '';
-      const parsed = parseDailyTextSubmissionResult(previousDraft, sources, allowedLinks);
-      if (parsed.value) return parsed.value;
-      validationError = parsed.error;
+    await agent.prompt(JSON.stringify({
+      ...buildDailyPromptPayload(sourceDay, sources),
+      supplementalEvidence: boundedToolEvidence(priorMessages),
+      priorDraft: (assistantText(priorMessages).at(-1) ?? '').slice(0, 30_000),
+      requiredOutput: 'Call submit_daily_activities with {"activities": [...]} now.',
+    }));
+    options.signal.throwIfAborted();
+    if (captured) return captured;
+    const last = lastAssistant(agent.state.messages);
+    if (!last || (last.role === 'assistant' && ['error', 'aborted'].includes(last.stopReason))) {
+      throw new Error(last?.role === 'assistant' ? last.errorMessage || '模型结构化输出请求失败。' : '模型未返回结构化输出。');
     }
-    const message = `模型返回的 JSON 未通过日程格式校验：${validationError || '未返回可读的 JSON。'}`;
-    if (INCOMPLETE_JSON.test(validationError)) throw new StructuredOutputTruncatedError(message);
-    throw new Error(message);
+    if (last.stopReason === 'length') throw new StructuredOutputTruncatedError('模型结构化输出达到最大长度。');
+    throw new Error('模型未能提交符合格式的日程结果。');
   } finally {
     options.signal.removeEventListener('abort', abort);
     agent.abort();
@@ -139,14 +131,7 @@ async function runStructuredSubmission(
 
 export async function repairStructuredSubmission(
   sourceDay: string, sources: PreparedDailySource[], settings: StoredModelSettings, options: DailyExtractionOptions,
-  priorMessages: AgentMessage[], allowedLinks: Set<string>, useNativeOutput = true,
+  priorMessages: AgentMessage[], allowedLinks: Set<string>,
 ): Promise<DailyActivityOutput> {
-  const samplingParams = useNativeOutput ? dailyStructuredSamplingParams(settings.config.api) : undefined;
-  try {
-    return await runStructuredSubmission(sourceDay, sources, settings, options, priorMessages, allowedLinks,
-      samplingParams, MAX_STRUCTURED_ATTEMPTS);
-  } catch (error) {
-    if (!samplingParams || !isUnsupportedStructuredOutputError(error)) throw error;
-    return runStructuredSubmission(sourceDay, sources, settings, options, priorMessages, allowedLinks, undefined, 1);
-  }
+  return runStructuredSubmission(sourceDay, sources, settings, options, priorMessages, allowedLinks);
 }

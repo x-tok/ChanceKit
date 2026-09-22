@@ -53,10 +53,7 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     await new Promise(resolve => setTimeout(resolve, 180));
     active--;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    const delta = visual
-      ? { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'submit_visual_text', arguments: JSON.stringify(output) } }] }
-      : { role: 'assistant', content: JSON.stringify(output) };
-    response.write(`data: ${JSON.stringify({ id: 'test', choices: [{ index: 0, delta, finish_reason: visual ? 'tool_calls' : 'stop' }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ id: 'test', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: visual ? 'submit_visual_text' : 'submit_daily_activities', arguments: JSON.stringify(output) } }] }, finish_reason: 'tool_calls' }] })}\n\n`);
     response.end('data: [DONE]\n\n');
   });
   endpoint.listen(0, '127.0.0.1');

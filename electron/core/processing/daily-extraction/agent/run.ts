@@ -54,7 +54,8 @@ export function splitDailySources(sources: PreparedDailySource[], maxChars = MAX
 async function extractChunk(
   sourceDay: string, sources: PreparedDailySource[], settings: StoredModelSettings, options: DailyExtractionOptions,
 ): Promise<DailyActivityOutput> {
-  const toolset = createDailyAgentTools({ sources, settings, options });
+  let captured: DailyActivityOutput | undefined;
+  const toolset = createDailyAgentTools({ sources, settings, options, submit: value => { captured = value; } });
   const nativeSamplingParams = dailyStructuredSamplingParams(settings.config.api);
   const runAgent = async (samplingParams: Record<string, unknown> | undefined): Promise<AgentMessage[]> => {
     const agent = createConfiguredPiAgent(settings, {
@@ -62,7 +63,7 @@ async function extractChunk(
       samplingParams,
     });
     let turns = 0;
-    agent.shouldStopAfterTurn = () => ++turns >= 4;
+    agent.shouldStopAfterTurn = () => captured !== undefined || ++turns >= 4;
     agent.state.tools = toolset.tools;
     const abort = () => agent.abort();
     options.signal.addEventListener('abort', abort, { once: true });
@@ -81,20 +82,19 @@ async function extractChunk(
     }
   };
 
-  let usedNativeOutput = Boolean(nativeSamplingParams);
   let messages: AgentMessage[];
   try {
     messages = await runAgent(nativeSamplingParams);
   } catch (error) {
     if (!nativeSamplingParams || !isUnsupportedStructuredOutputError(error)) throw error;
-    usedNativeOutput = false;
     messages = await runAgent(undefined);
   }
+  if (captured) return captured;
   for (const text of assistantText(messages).reverse()) {
     const parsed = parseDailyTextSubmission(text, sources, toolset.allowedLinks);
     if (parsed) return parsed;
   }
-  return repairStructuredSubmission(sourceDay, sources, settings, options, messages, toolset.allowedLinks, usedNativeOutput);
+  return repairStructuredSubmission(sourceDay, sources, settings, options, messages, toolset.allowedLinks);
 }
 
 async function extractChunkWithinOutputLimit(

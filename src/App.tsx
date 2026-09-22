@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, CalendarDays, ChevronDown, ChevronUp, Download, ExternalLink, FileText, Hash, ImageOff, Link2, LoaderCircle, MessageCircle, Plug, RefreshCw, Search, Settings2, ShieldCheck, Star, Unplug, Users, Wifi, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, BriefcaseBusiness, CalendarDays, ChevronDown, ChevronUp, Download, ExternalLink, FileText, Hash, ImageOff, Link2, LoaderCircle, MessageCircle, Plug, RefreshCw, Search, Settings2, ShieldCheck, Star, Unplug, Users, Wifi, X } from 'lucide-react';
 import type { Account, AppState, Group, HistoryResult, Message, MessagePage, Segment } from './shared';
 import { bridge, isDesktop } from './bridge';
 import { BRAND } from './brand';
 import { Onboarding } from './onboarding/Onboarding';
 import { SettingsPage } from './settings/SettingsPage';
 import { Schedule } from './SchedulePage';
+import { JobChatPage } from './JobChatPage';
 import s from './App.module.css';
 
 const initialState: AppState = { phase: 'idle', detail: '尚未连接 QQ', runtime: null, groups: [], archived: 0, historyBusy: false, logs: [] };
@@ -29,7 +30,7 @@ function Avatar({ name, id, size = 'normal' }: { name: string; id?: string; size
 
 export function App() {
   const [state, setState] = useState<AppState>(initialState);
-  const [view, setView] = useState<'messages' | 'schedule' | 'settings'>('schedule');
+  const [view, setView] = useState<'messages' | 'schedule' | 'job-chat' | 'settings'>('schedule');
   const [settingsOpened, setSettingsOpened] = useState(false);
   const [onboarding, setOnboarding] = useState<'loading' | 'required' | 'complete'>('loading');
   const [selected, setSelected] = useState('');
@@ -70,6 +71,7 @@ export function App() {
       </div>
       <nav aria-label="主导航">
         <button className={view === 'schedule' ? s.navActive : ''} aria-current={view === 'schedule' ? 'page' : undefined} onClick={() => setView('schedule')}><CalendarDays size={18} /><span>日程</span></button>
+        <button className={view === 'job-chat' ? s.navActive : ''} aria-current={view === 'job-chat' ? 'page' : undefined} onClick={() => setView('job-chat')}><BriefcaseBusiness size={18} /><span>助手</span></button>
         <button className={view === 'messages' ? s.navActive : ''} onClick={() => setView('messages')}><MessageCircle size={18} /><span>群消息</span>{visibleGroups.filter(g => g.followed).length > 0 && <small>{visibleGroups.filter(g => g.followed).length}</small>}</button>
         <button className={view === 'settings' ? s.navActive : ''} aria-current={view === 'settings' ? 'page' : undefined} onClick={() => { setSettingsOpened(true); setView('settings'); }}><Settings2 size={18} /><span>设置</span></button>
       </nav>
@@ -80,10 +82,11 @@ export function App() {
     </aside>
     <main id="main-content" className={s.main}>
       <header className={s.topbar}>
-        <div className={s.breadcrumb}>工作空间 <span>/</span> <strong>{view === 'settings' ? '设置' : view === 'schedule' ? '日程' : '群消息'}</strong></div>
+        <div className={s.breadcrumb}>工作空间 <span>/</span> <strong>{view === 'settings' ? '设置' : view === 'schedule' ? '日程' : view === 'job-chat' ? '助手' : '群消息'}</strong></div>
         <div className={s.topbarRight}>{!isDesktop && <span className={s.previewBadge}>浏览器预览</span>}<span className={`${s.connectionStatus} ${online ? s.connected : ''}`}><span />{phases[state.phase]}</span></div>
       </header>
       {view === 'messages' ? <Workspace key={account?.id || 'offline'} state={state} group={selectedGroup} select={setSelected} revision={messageRevision} run={run} notify={notify} onConnect={() => { setSettingsOpened(true); setView('settings'); }} /> : null}
+      {view === 'job-chat' && <JobChatPage key={state.localAccount?.id || 'empty'} state={state} onModels={() => { setSettingsOpened(true); setView('settings'); }} />}
       {settingsOpened && <SettingsPage active={view === 'settings'} state={state} run={run} onMessages={() => setView('messages')} />}
       {view === 'schedule' && <Schedule state={state} onModels={() => { setSettingsOpened(true); setView('settings'); }} onGroup={id => { setSelected(id); setView('messages'); }} />}
       <footer className={s.statusbar}><span><span className={`${s.statusDot} ${online ? s.liveDot : ''}`} />{state.detail}</span>{online && <span>{number.format(state.archived)} 条已归档{state.lastEventAt && ` · 最近消息 ${time(state.lastEventAt)}`}</span>}</footer>

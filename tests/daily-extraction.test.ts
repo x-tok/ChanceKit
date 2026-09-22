@@ -13,12 +13,11 @@ import { classifySourceLink } from '../electron/core/processing/daily-extraction
 import { buildDailyPromptPayload } from '../electron/core/processing/daily-extraction/agent/prompt';
 import { buildDailySources, humanMaterialText, humanMessageText } from '../electron/core/processing/daily-extraction/agent/source-builder';
 import { dailyPromptCharBudget, extractDailyActivities, parseDailyTextSubmission, splitDailySources } from '../electron/core/processing/daily-extraction/agent/run';
-import { dailyStructuredSamplingParams } from '../electron/core/processing/daily-extraction/agent/structured-output';
-import { parseDailySubmission } from '../electron/core/processing/daily-extraction/agent/activity-output';
 import { sameRecruitingEvent } from '../electron/core/processing/daily-extraction/dedupe';
 import { DailyScheduleProcessor } from '../electron/core/processing/daily-extraction/queue/processor';
 import { createReadSourceLinksTool } from '../electron/core/processing/daily-extraction/agent/tools/read-source-links';
 import { DAILY_AGENT_TOOL_NAMES } from '../electron/core/processing/daily-extraction/agent/tools/index';
+import { parseDailySubmission } from '../electron/core/processing/daily-extraction/agent/tools/submit-daily-activities';
 import type { DailyExtractionResult, DailyProcessingJob, PreparedDailySource } from '../electron/core/processing/daily-extraction/types';
 import type { ActivityInput } from '../src/schedule';
 import { sample } from './fixtures';
@@ -235,7 +234,7 @@ test('JSON text responses use the same strict structured-result validation', () 
   assert.equal(parseDailyTextSubmission(JSON.stringify([{ ...activity, sourceRefs: [2] }]), sources), undefined);
 });
 
-test('daily extraction uses provider structured output on the primary agent and repairs invalid JSON', async t => {
+test('daily extraction forces a validated submit tool call after an unstructured response', async t => {
   const bodies: Record<string, any>[] = [];
   const endpoint = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -245,12 +244,8 @@ test('daily extraction uses provider structured output on the primary agent and 
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     if (bodies.length === 1) {
       response.write(`data: ${JSON.stringify({ id: 'first', choices: [{ index: 0, delta: { role: 'assistant', content: '我已经整理好了。' }, finish_reason: 'stop' }] })}\n\n`);
-    } else if (bodies.length === 2) {
-      response.write(`data: ${JSON.stringify({ id: 'invalid-json', choices: [{ index: 0, delta: { role: 'assistant',
-        content: JSON.stringify({ activities: [{ ...activity, startDate: '9月24日', sourceRefs: [1] }] }) }, finish_reason: 'stop' }] })}\n\n`);
     } else {
-      response.write(`data: ${JSON.stringify({ id: 'valid-json', choices: [{ index: 0, delta: { role: 'assistant',
-        content: JSON.stringify({ activities: [{ ...activity, sourceRefs: [1] }] }) }, finish_reason: 'stop' }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ id: 'final', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'submit_daily_activities', arguments: JSON.stringify({ activities: [{ ...activity, sourceRefs: [1] }] }) } }] }, finish_reason: 'tool_calls' }] })}\n\n`);
     }
     response.end('data: [DONE]\n\n');
   });
@@ -266,139 +261,9 @@ test('daily extraction uses provider structured output on the primary agent and 
     apiKey: 'test-key', updatedAt: new Date().toISOString(),
   }, { signal: new AbortController().signal });
   assert.deepEqual(result.activities, [{ ...activity, registrationUrl: null, sourceRefs: [1] }]);
-  assert.equal(bodies.length, 3);
-  assert.deepEqual(bodies[0].response_format, { type: 'json_object' });
-  assert.deepEqual(bodies[0].tools.map((tool: any) => tool.function.name), ['read_source_links']);
-  assert.deepEqual(bodies[1].response_format, { type: 'json_object' });
-  assert.equal(bodies[1].tools, undefined);
-  assert.equal(bodies[1].tool_choice, undefined);
-  assert.match(JSON.stringify(bodies[2].messages), /日期/);
-});
-
-test('structured extraction uses strict response schemas when the protocol supports them', () => {
-  const params = dailyStructuredSamplingParams('openai-responses') as {
-    text: { format: { type: string; name: string; strict: boolean; schema: Record<string, any> } };
-  };
-  assert.equal(params.text.format.type, 'json_schema');
-  assert.equal(params.text.format.name, 'chancekit_daily_activities');
-  assert.equal(params.text.format.strict, true);
-  assert.deepEqual(params.text.format.schema.required, ['activities']);
-  assert.equal(params.text.format.schema.additionalProperties, false);
-  assert.equal(dailyStructuredSamplingParams('anthropic-messages'), undefined);
-});
-
-test('primary extraction retries without native JSON mode when the provider explicitly rejects it', async t => {
-  const bodies: Record<string, any>[] = [];
-  const endpoint = createServer(async (request, response) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-    bodies.push(body);
-    if (bodies.length === 1) {
-      response.writeHead(400, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ error: { message: 'Unsupported parameter: response_format' } }));
-      return;
-    }
-    response.writeHead(200, { 'content-type': 'text/event-stream' });
-    response.write(`data: ${JSON.stringify({ id: 'fallback', choices: [{ index: 0, delta: { role: 'assistant',
-      content: JSON.stringify({ activities: [{ ...activity, sourceRefs: [1] }] }) }, finish_reason: 'stop' }] })}\n\n`);
-    response.end('data: [DONE]\n\n');
-  });
-  endpoint.listen(0, '127.0.0.1');
-  await once(endpoint, 'listening');
-  t.after(async () => { endpoint.closeAllConnections(); await new Promise<void>(resolve => endpoint.close(() => resolve())); });
-  const message = normalizeMessage({ ...sample(12, `${activity.title}\n${activity.evidence}`),
-    time: Date.parse('2026-09-21T04:00:00Z') / 1000 }, 'a');
-  const job: DailyProcessingJob = { key: 'a:2026-09-21', accountId: 'a', sourceDay: '2026-09-21', hash: 'hash', attempts: 1,
-    messages: [{ ref: 1, message, contentHash: 'hash', groupName: '测试群' }] };
-  const result = await extractDailyActivities(job, {
-    config: { ...defaultModelConfig, provider: 'custom', modelId: 'test-model', reasoning: false,
-      baseUrl: `http://127.0.0.1:${(endpoint.address() as { port: number }).port}/v1` },
-    apiKey: 'test-key', updatedAt: new Date().toISOString(),
-  }, { signal: new AbortController().signal });
-  assert.deepEqual(result.activities, [{ ...activity, registrationUrl: null, sourceRefs: [1] }]);
   assert.equal(bodies.length, 2);
-  assert.deepEqual(bodies[0].response_format, { type: 'json_object' });
-  assert.equal(bodies[1].response_format, undefined);
-  assert.deepEqual(bodies[0].tools.map((tool: any) => tool.function.name), ['read_source_links']);
-  assert.deepEqual(bodies[1].tools.map((tool: any) => tool.function.name), ['read_source_links']);
-});
-
-test('daily extraction splits a batch whose structured JSON reaches the output limit and merges duplicate events', async t => {
-  const sourceCounts: number[] = [];
-  const endpoint = createServer(async (request, response) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-    const user = body.messages.findLast((message: any) => message.role === 'user');
-    const userText = typeof user.content === 'string' ? user.content
-      : user.content.filter((part: any) => part.type === 'text').map((part: any) => part.text).join('');
-    const input = JSON.parse(userText);
-    const sources = input.sources ?? [];
-    sourceCounts.push(sources.length);
-    response.writeHead(200, { 'content-type': 'text/event-stream' });
-    const content = sources.length > 1
-      ? `{"activities":[{"title":"${activity.title}`
-      : JSON.stringify({ activities: [{ ...activity, sourceRefs: [sources[0].source] }] });
-    response.write(`data: ${JSON.stringify({ id: `batch-${sourceCounts.length}`, choices: [{ index: 0,
-      delta: { role: 'assistant', content }, finish_reason: sources.length > 1 ? 'length' : 'stop' }] })}\n\n`);
-    response.end('data: [DONE]\n\n');
-  });
-  endpoint.listen(0, '127.0.0.1');
-  await once(endpoint, 'listening');
-  t.after(async () => { endpoint.closeAllConnections(); await new Promise<void>(resolve => endpoint.close(() => resolve())); });
-  const timestamp = Date.parse('2026-09-21T04:00:00Z') / 1000;
-  const messages = [13, 14].map((id, index) => {
-    const message = normalizeMessage({ ...sample(id, `${activity.title}\n${activity.evidence}`), time: timestamp + index }, 'a');
-    return { ref: index + 1, message, contentHash: `hash-${id}`, groupName: '测试群' };
-  });
-  const result = await extractDailyActivities({
-    key: 'a:2026-09-21', accountId: 'a', sourceDay: '2026-09-21', hash: 'hash', attempts: 1, messages,
-  }, {
-    config: { ...defaultModelConfig, provider: 'custom', modelId: 'test-model', reasoning: false,
-      baseUrl: `http://127.0.0.1:${(endpoint.address() as { port: number }).port}/v1` },
-    apiKey: 'test-key', updatedAt: new Date().toISOString(),
-  }, { signal: new AbortController().signal });
-  assert.deepEqual(sourceCounts, [2, 1, 1]);
-  assert.deepEqual(result.activities, [{ ...activity, registrationUrl: null, sourceRefs: [1, 2] }]);
-});
-
-test('unsupported native JSON mode falls back to schema-prompted JSON without tools', async t => {
-  const bodies: Record<string, any>[] = [];
-  const endpoint = createServer(async (request, response) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-    bodies.push(body);
-    if (bodies.length === 2) {
-      response.writeHead(400, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ error: { message: 'Unsupported parameter: response_format' } }));
-      return;
-    }
-    response.writeHead(200, { 'content-type': 'text/event-stream' });
-    const content = bodies.length === 1 ? '我已经整理好了。' : JSON.stringify({ activities: [{ ...activity, sourceRefs: [1] }] });
-    response.write(`data: ${JSON.stringify({ id: `response-${bodies.length}`, choices: [{ index: 0,
-      delta: { role: 'assistant', content }, finish_reason: 'stop' }] })}\n\n`);
-    response.end('data: [DONE]\n\n');
-  });
-  endpoint.listen(0, '127.0.0.1');
-  await once(endpoint, 'listening');
-  t.after(async () => { endpoint.closeAllConnections(); await new Promise<void>(resolve => endpoint.close(() => resolve())); });
-  const message = normalizeMessage({ ...sample(11, `${activity.title}\n${activity.evidence}`),
-    time: Date.parse('2026-09-21T04:00:00Z') / 1000 }, 'a');
-  const job: DailyProcessingJob = { key: 'a:2026-09-21', accountId: 'a', sourceDay: '2026-09-21', hash: 'hash', attempts: 1,
-    messages: [{ ref: 1, message, contentHash: 'hash', groupName: '测试群' }] };
-  const result = await extractDailyActivities(job, {
-    config: { ...defaultModelConfig, provider: 'custom', modelId: 'test-model', reasoning: false,
-      baseUrl: `http://127.0.0.1:${(endpoint.address() as { port: number }).port}/v1` },
-    apiKey: 'test-key', updatedAt: new Date().toISOString(),
-  }, { signal: new AbortController().signal });
-  assert.deepEqual(result.activities, [{ ...activity, registrationUrl: null, sourceRefs: [1] }]);
-  assert.deepEqual(bodies[0].response_format, { type: 'json_object' });
-  assert.deepEqual(bodies[0].tools.map((tool: any) => tool.function.name), ['read_source_links']);
-  assert.deepEqual(bodies[1].response_format, { type: 'json_object' });
-  assert.equal(bodies[2].response_format, undefined);
-  assert.equal(bodies[2].tools, undefined);
+  assert.equal(bodies[1].tool_choice, 'required');
+  assert.deepEqual(bodies[1].tools.map((tool: any) => tool.function.name), ['submit_daily_activities']);
 });
 
 test('processing details separate pending, running and completed messages and retain the JSON result', async t => {
@@ -503,8 +368,8 @@ test('links are classified before reading and oversized days split in stable sou
   assert.throws(() => dailyPromptCharBudget({ ...defaultModelConfig, contextWindow: 1024, maxTokens: 1024 }), /上下文配置不足/);
 });
 
-test('daily agent exposes only source-reading tools and link reader stays within source evidence', async () => {
-  assert.deepEqual(DAILY_AGENT_TOOL_NAMES, ['read_source_links']);
+test('daily agent exposes two focused tools and link reader stays within source evidence', async () => {
+  assert.deepEqual(DAILY_AGENT_TOOL_NAMES, ['read_source_links', 'submit_daily_activities']);
   const message = normalizeMessage(sample(10, '详情 https://example.com/jobs'), 'a');
   const source: PreparedDailySource = {
     ref: 1, message, contentHash: 'hash', groupName: '测试群', displayTime: '2026-09-21 12:00:00',
