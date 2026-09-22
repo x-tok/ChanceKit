@@ -120,52 +120,53 @@ const talk: ActivityInput = {
 test('search covers daily-processed activities and other messages without an information index or calendar cutoff', async t => {
   const f = await fixture(t);
   const daily = new DailyScheduleStore(f.file);
-  t.after(() => daily.close());
-  const messages = [
-    normalizeMessage(sample(1, '港湾研究院宣讲与联合双选会通知'), 'a'),
-    normalizeMessage(sample(2, '星港物流招聘实习生，工作地点成都'), 'a'),
-    normalizeMessage(sample(3, '转发港湾研究院通知', 731234568), 'a'),
-  ];
-  f.messages.put(messages); daily.enqueue('a');
-  const job = daily.claim('a')!;
-  const ref = (key: string) => job.messages.find(source => source.message.key === key)!.ref;
-  const fair = { ...talk, title: '联合双选会', type: '双选会' as const, startDate: '2027-03-15' };
-  assert.equal(daily.complete(job, {
-    activities: [
-      { ...talk, sourceRefs: [ref(messages[0].key), ref(messages[2].key)] },
-      { ...fair, sourceRefs: [ref(messages[0].key)] },
-    ],
-    sources: job.messages.map(source => ({ ...source, displayTime: '2026-09-19', text: source.message.text,
-      links: [], extractedContent: '', materials: [], warnings: [] })), warnings: [], reviewReasons: [],
-  }), true);
-  assert.equal(f.schedule.information.page('a', { category: 'information' }).total, 0);
-  const results = f.chat.search('a', { limit: 20 });
-  assert.equal(results.length, 3);
-  const event = results.find(item => item.title === talk.title)!;
-  assert.equal(event.activityType, '宣讲会');
-  assert.equal(event.startDate, '2027-03-12');
-  assert.equal(f.chat.search('a', { cities: ['深圳'], workContents: ['嵌入式'] }).length, 2);
-  assert.equal(f.chat.search('a', { keywords: ['双选会'] }).some(item => item.activityType === '双选会'), true);
-  const notice = results.find(item => item.category === 'processed')!;
-  assert.match(f.chat.resultDetail('a', notice)!.sources[0].text, /星港物流/);
-  const detail = f.chat.resultDetail('a', event)!;
-  assert.equal(detail.sources.length, 2);
-  assert.equal(detail.activity!.location, talk.location);
-  assert.equal(f.chat.resultDetail('b', event), null);
-  assert.deepEqual(f.chat.dataset('a'), { information: 0, incomplete: 0, activities: 2, processed: 1,
-    followedGroups: 2, newestMessageAt: messages[2].time });
-  const paged = [0, 1, 2].flatMap(offset => f.chat.search('a', { limit: 1, offset }));
-  assert.equal(new Set(paged.map(jobResultKey)).size, 3);
+  try {
+    const messages = [
+      normalizeMessage(sample(1, '港湾研究院宣讲与联合双选会通知'), 'a'),
+      normalizeMessage(sample(2, '星港物流招聘实习生，工作地点成都'), 'a'),
+      normalizeMessage(sample(3, '转发港湾研究院通知', 731234568), 'a'),
+    ];
+    f.messages.put(messages); daily.enqueue('a');
+    const job = daily.claim('a')!;
+    const ref = (key: string) => job.messages.find(source => source.message.key === key)!.ref;
+    const fair = { ...talk, title: '联合双选会', type: '双选会' as const, startDate: '2027-03-15' };
+    assert.equal(daily.complete(job, {
+      activities: [
+        { ...talk, sourceRefs: [ref(messages[0].key), ref(messages[2].key)] },
+        { ...fair, sourceRefs: [ref(messages[0].key)] },
+      ],
+      sources: job.messages.map(source => ({ ...source, displayTime: '2026-09-19', text: source.message.text,
+        links: [], extractedContent: '', materials: [], warnings: [] })), warnings: [], reviewReasons: [],
+    }), true);
+    assert.equal(f.schedule.information.page('a', { category: 'information' }).total, 0);
+    const results = f.chat.search('a', { limit: 20 });
+    assert.equal(results.length, 3);
+    const event = results.find(item => item.title === talk.title)!;
+    assert.equal(event.activityType, '宣讲会');
+    assert.equal(event.startDate, '2027-03-12');
+    assert.equal(f.chat.search('a', { cities: ['深圳'], workContents: ['嵌入式'] }).length, 2);
+    assert.equal(f.chat.search('a', { keywords: ['双选会'] }).some(item => item.activityType === '双选会'), true);
+    const notice = results.find(item => item.category === 'processed')!;
+    assert.match(f.chat.resultDetail('a', notice)!.sources[0].text, /星港物流/);
+    const detail = f.chat.resultDetail('a', event)!;
+    assert.equal(detail.sources.length, 2);
+    assert.equal(detail.activity!.location, talk.location);
+    assert.equal(f.chat.resultDetail('b', event), null);
+    assert.deepEqual(f.chat.dataset('a'), { information: 0, incomplete: 0, activities: 2, processed: 1,
+      followedGroups: 2, newestMessageAt: messages[2].time });
+    const paged = [0, 1, 2].flatMap(offset => f.chat.search('a', { limit: 1, offset }));
+    assert.equal(new Set(paged.map(jobResultKey)).size, 3);
 
-  // Source edits and unfollows invalidate the corresponding results, even before extraction restarts.
-  f.messages.follow('a', '731234568', false);
-  assert.equal(f.chat.resultDetail('a', event)!.sources.length, 1);
-  f.messages.put([normalizeMessage(sample(1, '消息已更正'), 'a')]);
-  assert.equal(f.chat.resultDetail('a', event), null);
-  assert.equal(f.chat.search('a', {}).length, 1);
-  const pending = normalizeMessage(sample(4, '尚未处理的岗位'), 'a');
-  f.messages.put([pending]);
-  assert.equal(f.chat.search('a', { keywords: ['尚未处理'] }).length, 0);
+    // Source edits and unfollows invalidate the corresponding results, even before extraction restarts.
+    f.messages.follow('a', '731234568', false);
+    assert.equal(f.chat.resultDetail('a', event)!.sources.length, 1);
+    f.messages.put([normalizeMessage(sample(1, '消息已更正'), 'a')]);
+    assert.equal(f.chat.resultDetail('a', event), null);
+    assert.equal(f.chat.search('a', {}).length, 1);
+    const pending = normalizeMessage(sample(4, '尚未处理的岗位'), 'a');
+    f.messages.put([pending]);
+    assert.equal(f.chat.search('a', { keywords: ['尚未处理'] }).length, 0);
+  } finally { daily.close(); }
 });
 
 test('detail tools distinguish multiple activities in one message and reject unsurfaced or revoked results', async t => {

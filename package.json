@@ -81,8 +81,7 @@
       "LICENSE",
       "PRIVACY.md",
       "DISCLAIMER.md",
-      "THIRD_PARTY_NOTICES.md",
-      "licenses/**"
+      "THIRD_PARTY_NOTICES.md"
     ],
     "extraResources": [
       {

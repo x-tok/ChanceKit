@@ -37,7 +37,7 @@ test('model settings are encrypted, private, restart-persistent and never return
     assert.ok(!JSON.stringify(result).includes('sk-private-key'));
     const file = path.join(root, 'model-settings.enc');
     assert.ok(!(await readFile(file)).includes(Buffer.from('sk-private-key')));
-    assert.equal((await stat(file)).mode & 0o777, 0o600);
+    if (process.platform !== 'win32') assert.equal((await stat(file)).mode & 0o777, 0o600);
     const restarted = new ModelSettingsStore(root, crypto);
     assert.deepEqual((await restarted.get()).config, config);
     assert.equal((await restarted.saved())?.apiKey, 'sk-private-key');
