@@ -53,6 +53,7 @@ resources/napcat/*.part
 *.zip
 
 # OS and local editor state
+.agents/
 .DS_Store
 Thumbs.db
 Desktop.ini
