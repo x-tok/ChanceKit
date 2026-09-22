@@ -58,6 +58,21 @@ test('NapCat management uses the salted token hash, QR refresh and actual login 
   } finally { await fixture.close(); }
 });
 
+test('Fresh login waits for the QQ group cache instead of persisting a transient empty list', async () => {
+  const fixture = await mockNapCat();
+  const service = new AppService(os.tmpdir(), new Store(':memory:'), () => {});
+  let reads = 0;
+  fixture.respond('get_group_list', () => ++reads === 1 ? [] : [
+    { group_id: 731234567, group_name: '群缓存恢复', member_count: 100, max_member_count: 500 },
+  ]);
+  try {
+    await service.request({ type: 'connect', config: fixture.config });
+    assert.equal(reads, 2);
+    assert.equal(service.state.groups.length, 1);
+    assert.equal(service.state.groups[0].name, '群缓存恢复');
+  } finally { await service.close(); await fixture.close(); }
+});
+
 test('Storage deduplicates replay but preserves distinct messages and account boundaries', () => {
   const store = new Store(':memory:');
   try {
@@ -177,12 +192,12 @@ test('End-to-end service: groups, paged history, live dedup, export, offline rea
     assert.equal(service.state.phase, 'online');
     assert.equal(service.state.groups.length, 3);
     await service.request({ type: 'follow', groupId: '731234567', followed: true });
-    const recent: any = await service.request({ type: 'history', groupId: '731234567', older: false });
+    const recent: any = await service.request({ type: 'history', groupId: '731234567', older: false, since: sample(3, '').time });
     assert.equal(recent.added, 3);
     assert.equal((await service.request({ type: 'history', groupId: '731234567', older: true }) as any).added, 2);
     assert.equal(fixture.calls.filter(c => c.action === 'get_group_msg_history')[1].params.message_seq, '3');
     assert.equal(fixture.calls.filter(c => c.action === 'get_group_msg_history')[1].params.reverse_order, true);
-    assert.equal((await service.request({ type: 'history', groupId: '731234567', older: true }) as any).boundary, 'uncertain');
+    await assert.rejects(service.request({ type: 'history', groupId: '731234567', older: true }), /尚未确认完整/);
     assert.equal((await service.request({ type: 'history', groupId: '731234569', older: false }) as any).boundary, 'empty');
     fixture.push(sample(5, '收到，感谢分享。'));
     fixture.push(sample(6, '新的实习通知。'));
@@ -195,10 +210,11 @@ test('End-to-end service: groups, paged history, live dedup, export, offline rea
     assert.equal(service.state.account, undefined, 'disconnect must clear the active account');
     await disconnecting;
     assert.equal((await service.request({ type: 'messages', groupId: '731234567', search: '', offset: 0 }) as any).total, 6);
+    const historyCallCount = fixture.calls.filter(call => call.action === 'get_group_msg_history').length;
     await service.request({ type: 'connect', config: fixture.config });
     // Reconnect refreshes followed groups from a new, recent anchor.
-    const historyCalls = fixture.calls.filter(c => c.action === 'get_group_msg_history');
-    assert.equal(historyCalls.at(-1)?.params.message_seq, undefined);
+    const reconnectCalls = fixture.calls.filter(call => call.action === 'get_group_msg_history').slice(historyCallCount);
+    assert.equal(reconnectCalls[0]?.params.message_seq, undefined);
     await service.request({ type: 'follow', groupId: '731234567', followed: false });
     fixture.push(sample(9, '取消关注后不归档'));
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -218,6 +234,26 @@ test('Onboarding history sync archives only messages on or after its start bound
     assert.equal(result.reachedStart, true);
     const page = await service.request({ type: 'messages', groupId: '731234567', search: '', offset: 0 }) as MessagePage;
     assert.equal(page.total, 2);
+  } finally { await service.close(); await fixture.close(); }
+});
+
+test('Default history sync reads the full three-day window when the latest view has a cache gap', async () => {
+  const fixture = await mockNapCat();
+  const store = new Store(':memory:');
+  const service = new AppService(os.tmpdir(), store, () => {});
+  try {
+    const since = initialSyncWindow().since;
+    const at = (id: number, time: number, text: string) => ({ ...sample(id, text), time });
+    fixture.respond('get_group_msg_history', params => ({ messages: params.message_seq
+      ? [at(9, since - 60, '边界之前'), at(10, since, '时间边界'), at(11, since + 60, '翻页锚点')]
+      : [at(1, since - 3600, '过旧的本地缓存'), at(11, since + 60, '较新的消息'), at(12, since + 120, '最新消息')] }));
+    await service.request({ type: 'connect', config: fixture.config });
+
+    const result = await service.request({ type: 'history', groupId: '731234567', older: false }) as HistoryResult;
+    assert.equal(result.added, 3);
+    assert.equal(result.reachedStart, true);
+    assert.equal(fixture.calls.filter(call => call.action === 'get_group_msg_history')[1].params.message_seq, '11');
+    assert.equal(store.messages('100010001', '731234567').total, 3);
   } finally { await service.close(); await fixture.close(); }
 });
 

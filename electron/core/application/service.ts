@@ -12,6 +12,11 @@ import { RuntimeManager, detectQQ } from '../runtime/runtime';
 import type { AttachmentRequest, ResolvedAttachment } from '../materials/material-document';
 import { readManagedAttachment } from '../archive/attachment-file';
 import { replyIds, type ReplyRequest } from '../archive/message-references';
+import { historyAnchor } from './history-pagination';
+import { recentHistoryWindow } from '../../../src/history-window';
+
+const GROUP_CACHE_READY_ATTEMPTS = 20;
+const GROUP_CACHE_RETRY_MS = 500;
 
 export class AppService {
   readonly state: AppState = { phase: 'idle', detail: '尚未连接 QQ', groups: [], runtime: null, archived: 0, logs: [], historyBusy: false };
@@ -280,7 +285,7 @@ export class AppService {
       if (generation !== this.generation || this.bot !== bot) { bot.close(); return; }
       if (!raw?.user_id) throw new Error('QQ 尚未完成登录。');
       const account: Account = { id: String(raw.user_id), nickname: String(raw.nickname ?? '').trim() || 'QQ 用户' };
-      const groups = await this.fetchGroups(bot);
+      const groups = await this.fetchGroups(bot, true);
       if (generation !== this.generation || this.bot !== bot) return;
       this.store.saveAccount(account);
       this.store.saveGroups(account.id, groups);
@@ -289,7 +294,7 @@ export class AppService {
       this.log('QQ 连接成功，群列表已更新');
       ready = true;
       for (const event of buffered) this.handleEvent(event);
-      // Only a recent-page reconciliation in v0.1; never label this a complete gap recovery.
+      // Reconcile the full recent window so reconnects cannot silently leave a page-sized gap.
       for (const group of this.state.groups.filter(g => g.followed)) {
         if (generation !== this.generation) return;
         await this.history(group.id, false).catch(error => this.log(`最近消息补取未完成：${errorText(error)}`));
@@ -345,31 +350,58 @@ export class AppService {
     this.reloadLocal();
   }
 
-  private async fetchGroups(bot: OneBot) {
-    const groups = await bot.call('get_group_list', { no_cache: true });
-    if (!Array.isArray(groups)) throw new Error('群列表响应格式不正确。');
-    return groups.filter(group => group?.group_id);
+  private async fetchGroups(bot: OneBot, waitForCache = false) {
+    const attempts = waitForCache ? GROUP_CACHE_READY_ATTEMPTS : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const groups = await bot.call('get_group_list', { no_cache: true });
+      if (!Array.isArray(groups)) throw new Error('群列表响应格式不正确。');
+      const valid = groups.filter(group => group?.group_id);
+      if (valid.length || attempt === attempts - 1) return valid;
+      await new Promise(resolve => setTimeout(resolve, GROUP_CACHE_RETRY_MS));
+    }
+    return [];
   }
 
   private async history(groupId: string, older: boolean, since?: number): Promise<HistoryResult> {
     if (!this.bot || this.state.phase !== 'online') throw new Error('请先连接 QQ，再获取消息记录。');
     if (this.state.historyBusy) throw new Error('正在读取消息，请等待当前批次完成。');
+    const ticket = ++this.historyGeneration;
+    this.patch({ historyBusy: true });
+    try {
+      if (older) return await this.historyPage(groupId, true, since);
+      const start = since ?? recentHistoryWindow().since;
+      let added = 0;
+      let received = 0;
+      let page: HistoryResult;
+      let readOlder = false;
+      do {
+        page = await this.historyPage(groupId, readOlder, start);
+        added += page.added;
+        received += page.received;
+        readOlder = true;
+      } while (!page.reachedStart && page.canContinue);
+      return { ...page, added, received };
+    } finally { if (ticket === this.historyGeneration) this.patch({ historyBusy: false }); }
+  }
+
+  private async historyPage(groupId: string, older: boolean, since?: number): Promise<HistoryResult> {
+    const bot = this.bot;
+    if (!bot) throw new Error('QQ 连接已断开，这次读取已取消。');
     const cursor = older ? this.cursors.get(groupId) : undefined;
     if (older && !cursor) throw new Error('连接恢复后需要先刷新最近消息，再继续读取更早记录。');
     const generation = this.generation;
-    const ticket = ++this.historyGeneration;
     const accountId = this.accountId();
-    this.patch({ historyBusy: true });
     try {
-      const result = await this.bot.call('get_group_msg_history', { group_id: groupId, count: 100, reverse_order: Boolean(cursor), ...(cursor ? { message_seq: cursor } : {}) });
-      if (generation !== this.generation) throw new Error('连接已切换，这次读取已取消。');
+      const result = await bot.call('get_group_msg_history', { group_id: groupId, count: 100, reverse_order: Boolean(cursor), ...(cursor ? { message_seq: cursor } : {}) });
+      if (generation !== this.generation || this.bot !== bot) throw new Error('连接已切换，这次读取已取消。');
       if (!Array.isArray(result?.messages)) throw new Error('消息历史响应格式不正确。');
       const messages = result.messages.map((raw: any) => normalizeMessage(raw, accountId, groupId));
       messages.sort((a: any, b: any) => a.time - b.time || (a.realSeq && b.realSeq ? Number(BigInt(a.realSeq) - BigInt(b.realSeq)) : 0));
-      const oldestTime = messages[0]?.time;
       const archivedMessages = since === undefined ? messages : messages.filter((message: Message) => message.time >= since);
       const added = this.store.put(archivedMessages);
-      const next = messages[0]?.externalId;
+      const anchor = historyAnchor(messages, since);
+      const oldestTime = anchor?.time;
+      const next = anchor?.externalId;
       const canContinue = Boolean(next && next !== cursor);
       if (next && (older || since !== undefined || !this.cursors.has(groupId))) this.cursors.set(groupId, next);
       this.reloadLocal();
@@ -383,11 +415,14 @@ export class AppService {
       };
     } catch (error) {
       if (error instanceof OneBotActionError && error.retcode === 1200 && /^消息.*不存在$/.test(error.wording)) {
-        if (!older) this.cursors.delete(groupId);
-        return { added: 0, received: 0, canContinue: false, boundary: older ? 'uncertain' : 'empty', reachedStart: since !== undefined };
+        if (!older) {
+          this.cursors.delete(groupId);
+          return { added: 0, received: 0, canContinue: false, boundary: 'empty', reachedStart: since !== undefined };
+        }
+        throw new Error('QQ 无法继续读取更早消息，最近三天的记录尚未确认完整。');
       }
       throw new Error(`${errorText(error)} 未能确认更早历史的范围。`);
-    } finally { if (ticket === this.historyGeneration) this.patch({ historyBusy: false }); }
+    }
   }
 
   private async export(groupId: string): Promise<string> {
