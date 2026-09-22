@@ -42,12 +42,12 @@ export function QQSetupStep({ state, onNext, onError }: { state: AppState; onNex
         <span className={s.taskMarker}>{officialReady ? <Check size={15} /> : <LogIn size={16} />}</span>
         <div><strong>登录官方 QQ，同步最近消息</strong><p>打开官方 QQ，确认会话列表和最近的云端消息已显示。</p><label><input type="checkbox" checked={officialReady} onChange={event => { setOfficialReady(event.target.checked); if (!event.target.checked) setExitReady(false); }} />我已完成登录与消息同步</label></div>
       </li>
-      {isMac && <li className={exitReady ? s.taskComplete : officialReady ? s.taskCurrent : s.taskPending} aria-disabled={!officialReady}>
+      <li className={exitReady ? s.taskComplete : officialReady ? s.taskCurrent : s.taskPending} aria-disabled={!officialReady}>
         <span className={s.taskMarker}>{exitReady ? <Check size={15} /> : <LogOut size={16} />}</span>
-        <div><strong>再正常退出官方 QQ</strong><p>见机随后会准备约 1 GB 的独立 QQ 副本，不改动原应用与聊天库。</p><label><input type="checkbox" checked={exitReady} disabled={!officialReady} onChange={event => setExitReady(event.target.checked)} />我已正常退出官方 QQ</label></div>
-      </li>}
+        <div><strong>再正常退出官方 QQ</strong><p>{isMac ? '见机随后会准备约 1 GB 的独立 QQ 副本，不改动原应用与聊天库。' : '请右键点击任务栏右下角系统托盘中的 QQ 图标，选择“退出”。只关闭窗口不会退出 QQ。'}</p><label><input type="checkbox" checked={exitReady} disabled={!officialReady} onChange={event => setExitReady(event.target.checked)} />我已正常退出官方 QQ</label></div>
+      </li>
     </ol>}
     {!isDesktop && <p className={s.previewNote}>浏览器仅用于预览，桌面客户端会执行 QQ 检测和安装引导。</p>}
-    <div className={`${s.stageFooter} ${s.stageFooterSolo}`}><button className={s.primaryButton} disabled={!state.qq || !officialReady || (isMac && !exitReady)} onClick={onNext}>继续设置 AI 服务 <ArrowRight size={17} /></button></div>
+    <div className={`${s.stageFooter} ${s.stageFooterSolo}`}><button className={s.primaryButton} disabled={!state.qq || !officialReady || !exitReady} onClick={onNext}>继续设置 AI 服务 <ArrowRight size={17} /></button></div>
   </div>;
 }
