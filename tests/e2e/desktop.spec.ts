@@ -74,9 +74,13 @@ test('desktop connects to NapCat, archives history and live messages, and render
     await expect(sidebar.locator('img')).toHaveCount(0);
     await page.screenshot({ path: 'test-results/account-disconnected.png' });
     await page.getByRole('button', { name: /^群消息/ }).click();
-    await page.getByRole('button', { name: /2027 届校园招聘/ }).click();
-    await expect(page.getByText('实时消息已通过 WebSocket 到达（测试）。', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: '设置', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '请先登录 QQ', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /2027 届校园招聘/ })).toHaveCount(0);
+    await expect(page.getByText('实时消息已通过 WebSocket 到达（测试）。', { exact: true })).toHaveCount(0);
+    await expect(page.getByText(/条已归档/)).toHaveCount(0);
+    await page.getByRole('button', { name: '日程', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '请先登录 QQ', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '前往设置', exact: true }).click();
     fixture.setLoggedIn(false);
     await page.getByRole('button', { name: '连接 QQ', exact: true }).click();
     await expect(page.getByAltText('QQ 登录二维码')).toBeVisible();
@@ -117,7 +121,7 @@ test('browser preview stays usable at narrow widths without a desktop bridge', a
   const page = await browser.newPage();
   try {
     await page.goto(server.resolvedUrls!.local[0]);
-    await expect(page.getByRole('heading', { name: '日程', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '请先登录 QQ', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
     for (const width of [1280, 760, 375, 320]) {

@@ -223,7 +223,8 @@ export class DailyScheduleStore {
     let day: string | undefined;
     if (messageKey) {
       const row = this.db.prepare('SELECT time FROM messages WHERE account_id=? AND key=?').get(accountId, messageKey);
-      if (row) day = beijingSourceDay(Number(row.time));
+      if (!row) throw new Error('需要重新处理的消息已不存在或不属于当前账号。');
+      day = beijingSourceDay(Number(row.time));
     }
     this.transaction(() => {
       this.db.prepare(`UPDATE schedule_daily_jobs SET status='pending',attempts=0,error='',available_at=0
@@ -332,9 +333,10 @@ export class DailyScheduleStore {
   details(accountId: string, query: ProcessingDetailsQuery): ProcessingDetailsPage {
     const effectiveStatus = "CASE WHEN d.status IN ('pending','running','failed') THEN d.status ELSE coalesce(j.status,d.status,'pending') END";
     const bucketSql: Record<ProcessingMessageBucket, string> = {
-      pending: `${effectiveStatus} IN ('pending','failed')`,
+      pending: `${effectiveStatus}='pending'`,
       running: `${effectiveStatus}='running'`,
-      completed: `${effectiveStatus} IN ('completed','partial')`,
+      completed: `${effectiveStatus}='completed'`,
+      review: `${effectiveStatus} IN ('partial','failed')`,
     };
     const base = `FROM messages m JOIN groups g ON g.account_id=m.account_id AND g.id=m.group_id
       LEFT JOIN schedule_jobs j ON j.message_key=m.key
@@ -342,11 +344,12 @@ export class DailyScheduleStore {
       WHERE m.account_id=? AND g.followed=1 AND m.time>=?`;
     const count = (bucket: ProcessingMessageBucket) => Number(this.db.prepare(`SELECT count(*) AS n ${base} AND ${bucketSql[bucket]}`)
       .get(accountId, query.since)?.n ?? 0);
-    const counts = { pending: count('pending'), running: count('running'), completed: count('completed') };
+    const counts = { pending: count('pending'), running: count('running'), completed: count('completed'), review: count('review') };
     const offset = query.offset ?? 0;
     const limit = query.limit ?? 100;
     const rows = this.db.prepare(`SELECT m.key,m.time,m.text,m.payload,g.name,
-      ${effectiveStatus} AS status,CASE WHEN ${effectiveStatus}='failed' THEN coalesce(d.error,j.error,'') ELSE coalesce(j.error,'') END AS error,
+      ${effectiveStatus} AS status,CASE WHEN ${effectiveStatus} IN ('failed','partial')
+        THEN coalesce(nullif(j.error,''),nullif(d.error,''),'') ELSE '' END AS error,
       coalesce((SELECT json_group_array(json_extract(c.payload,'$.title'))
         FROM activity_sources s JOIN activity_canonical c ON c.activity_id=s.activity_id WHERE s.message_key=m.key),'[]') AS activity_titles
       ${base} AND ${bucketSql[query.bucket]} ORDER BY m.time DESC,m.key DESC LIMIT ? OFFSET ?`)

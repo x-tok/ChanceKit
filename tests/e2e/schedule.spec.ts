@@ -36,7 +36,7 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     const body = JSON.parse(Buffer.concat(chunks).toString());
     const user = body.messages.find((message: any) => message.role === 'user');
     const text = typeof user.content === 'string' ? user.content : user.content.filter((part: any) => part.type === 'text').map((part: any) => part.text).join('');
-    const visual = body.tools[0].function.name === 'submit_visual_text';
+    const visual = body.tools?.some((tool: any) => tool.function?.name === 'submit_visual_text') ?? false;
     if (visual) {
       visionCalls++;
       expect(user.content.some((part: any) => part.type === 'image_url')).toBe(true);
@@ -53,7 +53,10 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     await new Promise(resolve => setTimeout(resolve, 180));
     active--;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    response.write(`data: ${JSON.stringify({ id: 'test', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: visual ? 'submit_visual_text' : 'submit_daily_activities', arguments: JSON.stringify(output) } }] }, finish_reason: 'tool_calls' }] })}\n\n`);
+    const delta = visual
+      ? { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'submit_visual_text', arguments: JSON.stringify(output) } }] }
+      : { role: 'assistant', content: JSON.stringify(output) };
+    response.write(`data: ${JSON.stringify({ id: 'test', choices: [{ index: 0, delta, finish_reason: visual ? 'tool_calls' : 'stop' }] })}\n\n`);
     response.end('data: [DONE]\n\n');
   });
   endpoint.listen(0, '127.0.0.1');
@@ -115,7 +118,7 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     await expect(stages).toContainText('完成');
     await waitForDayToSettle();
     await waitForSyncToStop(true);
-    await expect(page.getByText(/本次同步已完成|部分消息需要处理/)).toBeVisible();
+    await expect(page.getByText(/本次同步已完成|同步结束，\d+ 个日期批次需处理/)).toBeVisible();
     const syncDialog = page.getByRole('dialog');
     await expect(syncDialog.getByRole('navigation', { name: '消息整理状态' })).toContainText('待整理');
     await syncDialog.getByRole('button', { name: /已完成/ }).click();
@@ -226,16 +229,27 @@ test('schedule extracts followed messages with concurrent pi agents, persists ac
     const pausedRequests = requests;
     await new Promise(resolve => setTimeout(resolve, 250));
     expect(requests).toBe(pausedRequests);
+    await page.evaluate(() => window.desktop!.configureProcessing({ enabled: true, concurrency: 1, stopWhenIdle: true }));
+    await expect.poll(() => active).toBeGreaterThan(0);
+    await page.evaluate(() => window.desktop!.request({ type: 'disconnect' }));
+    await expect(page.getByRole('heading', { name: '请先登录 QQ', exact: true })).toBeVisible();
+    await expect.poll(() => active).toBe(0);
+    const disconnectedRequests = requests;
+    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(requests).toBe(disconnectedRequests);
+    await expect.poll(async () => (await page.evaluate(() => window.desktop!.processingStatus())).running).toBe(0);
     expect(errors).toEqual([]);
     await app.close();
     app = await electron.launch({ args: ['.'], env });
     page = await app.firstWindow();
+    await page.evaluate(config => window.desktop!.request({ type: 'connect', config }), fixture.config);
+    await expect(page.getByText('已连接', { exact: true })).toBeVisible({ timeout: 15_000 });
     await page.getByRole('button', { name: '日程', exact: true }).click();
     await page.getByLabel('跳转日期').fill('2026-09-24');
     await expect(page.getByRole('button', { name: '开始同步', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '查看活动：星河科技校园宣讲会', exact: true })).toBeVisible();
     await expect(page.getByRole('region', { name: '跨期事项' })).toContainText(ongoingEvent.title);
-    expect(requests).toBe(pausedRequests);
+    expect(requests).toBe(disconnectedRequests);
     const status = await page.evaluate(() => window.desktop!.processingStatus());
     expect(status.pending).toBe(1);
     expect(status.completed).toBe(0);
@@ -255,7 +269,8 @@ test('populated ongoing section and its detail fit desktop and mobile without re
   const activities: Activity[] = [events[0], events[1], ongoingEvent,
     { ...ongoingEvent, title: '研究院2026至2027年度毕业生网上报名', endDate: '2027-01-10' }].map((activity, index) =>
     ({ ...activity, id: String(index), sourceCount: 1, groupNames: ['测试关注群'], needsReview: false, updatedAt: 0 }));
-  const state: AppState = { phase: 'idle', detail: '未连接', runtime: null, groups: [], archived: 4, historyBusy: false, logs: [] };
+  const state: AppState = { phase: 'online', detail: '已连接', runtime: 'managed', groups: [], archived: 4, historyBusy: false, logs: [],
+    account: { id: '10001', nickname: '测试账号' }, localAccount: { id: '10001', nickname: '测试账号' } };
   try {
     await page.addInitScript(({ state, activities, status, details }) => {
       window.desktop = {
@@ -307,7 +322,7 @@ test('sync details show message images, open links externally and emphasize stop
   };
   const status = { ...emptyProcessingStatus, processorVersion: 3, enabled: true, since: 1, pending: 1 };
   const details = {
-    total: 1, hasMore: false, counts: { pending: 1, running: 0, completed: 0 },
+    total: 1, hasMore: false, counts: { pending: 1, running: 0, completed: 0, review: 0 },
     items: [{ key: 'message-1', bucket: 'pending' as const, state: 'pending' as const, groupName: '就业信息群', senderName: '就业老师',
       messageTime: Date.parse('2026-09-21T04:00:00Z') / 1000,
       text: '宣讲会详情和报名入口：https://jobs.example.com/campus/apply', contentTypes: ['text', 'image'],
@@ -348,25 +363,156 @@ test('sync details show message images, open links externally and emphasize stop
   } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
 });
 
-test('schedule browser preview has real empty states and responsive navigation down to 320px', async () => {
+test('completed sync identifies every date batch that still needs review', async () => {
+  const server = await preview({ preview: { host: '127.0.0.1', port: 5200, strictPort: false } });
+  const browser = await chromium.launch({ channel: 'chrome' });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+  const state: AppState = {
+    phase: 'online', detail: '已连接', runtime: 'managed', archived: 184, historyBusy: false, logs: [],
+    account: { id: '10001', nickname: '测试账号' }, localAccount: { id: '10001', nickname: '测试账号' },
+    groups: [{ id: '731234567', name: '东南大学重点单位就业信息交流群', memberCount: 100, maxMembers: 500, followed: true, messageCount: 184 }],
+  };
+  const status = {
+    ...emptyProcessingStatus, since: 1, completed: 3, partial: 1,
+    issues: [{ sourceDay: '2026-09-21', messageKey: 'message-1', status: 'partial' as const,
+      groupName: '东南大学重点单位就业信息交流群', messageCount: 46,
+      text: '纳睿雷达2027校园招聘宣讲会，部分信息见图片。', error: '第 2 张图片无法读取，请核对原始消息。' }],
+  };
+  const reviewItem = {
+    key: 'message-1', bucket: 'review' as const, state: 'partial' as const,
+    groupName: '东南大学重点单位就业信息交流群', senderName: '就业指导中心-杨添钦',
+    messageTime: Date.parse('2026-09-21T11:34:00Z') / 1000,
+    text: '纳睿雷达2027校园招聘宣讲会，部分信息见图片。', contentTypes: ['text', 'image'],
+    images: [], links: [], activityTitles: ['纳睿雷达2027校园招聘宣讲会'], error: '第 2 张图片无法读取，请核对原始消息。',
+  };
+  const details = { ...emptyProcessingDetails, total: 1, counts: { pending: 0, running: 0, completed: 183, review: 1 } };
+  try {
+    await page.addInitScript(({ state, status, details, reviewItem }) => {
+      (window as any).__retryKeys = [];
+      window.desktop = {
+        request: async () => state, subscribe: () => () => {}, savedConnection: async () => ({}),
+        schedule: async () => ({ activities: [], undated: [] }), activity: async () => null,
+        processingStatus: async () => status,
+        processingDetails: async (query: { bucket: string }) => ({ ...details, items: query.bucket === 'review' ? [reviewItem] : [] }),
+        retryProcessing: async (key?: string) => { (window as any).__retryKeys.push(key); return status; },
+        configureProcessing: async () => status,
+      } as unknown as DesktopBridge;
+    }, { state, status, details, reviewItem });
+    await page.goto(server.resolvedUrls!.local[0]);
+    await page.getByRole('button', { name: '再次同步', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: '同步结束，1 个日期批次需处理' })).toBeVisible();
+    await expect(dialog.getByRole('list', { name: '同步阶段' })).toContainText('需处理');
+    await expect(dialog.getByText('成功批次', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('需处理批次', { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: /需处理/ }).click();
+    const review = dialog.getByRole('region', { name: '需处理消息列表' });
+    await expect(review).toContainText('东南大学重点单位就业信息交流群');
+    await expect(review).toContainText('就业指导中心-杨添钦');
+    await expect(review).toContainText('第 2 张图片无法读取，请核对原始消息。');
+    await expect(review).toContainText('纳睿雷达2027校园招聘宣讲会');
+    await review.getByRole('button', { name: '重新处理当前列表' }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__retryKeys)).toEqual(['message-1']);
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 820 });
+      expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await page.screenshot({ path: `test-results/schedule-sync-review-required-${width}.png` });
+    }
+  } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
+});
+
+test('logged-out pages hide cached QQ data and skip archive queries', async () => {
+  const server = await preview({ preview: { host: '127.0.0.1', port: 5198, strictPort: false } });
+  const browser = await chromium.launch({ channel: 'chrome' });
+  const page = await browser.newPage();
+  const state: AppState = {
+    phase: 'idle', detail: '尚未连接 QQ', runtime: null, archived: 73, historyBusy: false, logs: [],
+    localAccount: { id: '10001', nickname: '上次登录账号' },
+    groups: [{ id: '731234567', name: '不应显示的缓存群聊', memberCount: 100, maxMembers: 500, followed: true, messageCount: 73 }],
+  };
+  try {
+    await page.addInitScript(({ state, activity, status, details }) => {
+      (window as any).__offlineReads = { messages: 0, schedule: 0, status: 0 };
+      window.desktop = {
+        request: async (command: { type: string }) => {
+          if (command.type === 'messages') (window as any).__offlineReads.messages++;
+          return command.type === 'state' ? state : { messages: [{ text: '不应显示的缓存消息' }], total: 1, hasMore: false };
+        },
+        subscribe: () => () => {}, savedConnection: async () => ({}),
+        schedule: async () => { (window as any).__offlineReads.schedule++; return { activities: [activity], undated: [] }; },
+        activity: async () => null,
+        processingStatus: async () => { (window as any).__offlineReads.status++; return status; },
+        processingDetails: async () => details,
+      } as unknown as DesktopBridge;
+    }, {
+      state,
+      activity: { ...events[0], id: 'cached', sourceCount: 1, groupNames: ['不应显示的缓存群聊'], needsReview: false, updatedAt: 0 },
+      status: emptyProcessingStatus,
+      details: emptyProcessingDetails,
+    });
+    await page.goto(server.resolvedUrls!.local[0]);
+    await expect(page.getByRole('heading', { name: '请先登录 QQ', exact: true })).toBeVisible();
+    await expect(page.getByText(events[0].title, { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: '群消息', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '请先登录 QQ', exact: true })).toBeVisible();
+    await expect(page.getByText('不应显示的缓存群聊', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('不应显示的缓存消息', { exact: true })).toHaveCount(0);
+    await expect(page.getByText(/73 条已归档/)).toHaveCount(0);
+    await page.waitForTimeout(100);
+    expect(await page.evaluate(() => (window as any).__offlineReads)).toEqual({ messages: 0, schedule: 0, status: 0 });
+    await page.screenshot({ path: 'test-results/logged-out-messages.png' });
+    await page.getByRole('button', { name: '日程', exact: true }).click();
+    await page.screenshot({ path: 'test-results/logged-out-schedule.png' });
+  } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
+});
+
+test('disabled schedule sync explains how to enable it on hover and focus', async () => {
+  const server = await preview({ preview: { host: '127.0.0.1', port: 5199, strictPort: false } });
+  const browser = await chromium.launch({ channel: 'chrome' });
+  const page = await browser.newPage();
+  const state: AppState = {
+    phase: 'online', detail: '已连接', runtime: 'managed', archived: 0, historyBusy: false, logs: [],
+    account: { id: '10001', nickname: '测试账号' }, localAccount: { id: '10001', nickname: '测试账号' },
+    groups: [{ id: '731234567', name: '尚未关注的群聊', memberCount: 100, maxMembers: 500, followed: false, messageCount: 0 }],
+  };
+  try {
+    await page.addInitScript(({ state, status, details }) => {
+      window.desktop = {
+        request: async () => state, subscribe: () => () => {}, savedConnection: async () => ({}),
+        schedule: async () => ({ activities: [], undated: [] }), activity: async () => null,
+        processingStatus: async () => status, processingDetails: async () => details,
+      } as unknown as DesktopBridge;
+    }, { state, status: emptyProcessingStatus, details: emptyProcessingDetails });
+    await page.goto(server.resolvedUrls!.local[0]);
+    const button = page.getByRole('button', { name: '开始同步', exact: true });
+    const action = button.locator('..');
+    const tooltip = page.getByRole('tooltip', { name: '请先在群消息中关注至少一个群聊。' });
+    await expect(button).toBeDisabled();
+    await action.hover();
+    await expect(tooltip).toHaveCSS('opacity', '1');
+    await action.focus();
+    await expect(tooltip).toHaveCSS('opacity', '1');
+    await page.screenshot({ path: 'test-results/schedule-sync-disabled-reason.png' });
+  } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
+});
+
+test('logged-out schedule shows a login prompt and responsive navigation down to 320px', async () => {
   const server = await preview({ preview: { host: '127.0.0.1', port: 5195, strictPort: false } });
   const browser = await chromium.launch({ channel: 'chrome' });
   const page = await browser.newPage();
   try {
     await page.goto(server.resolvedUrls!.local[0]);
     await page.getByRole('button', { name: '日程', exact: true }).click();
-    await expect(page.getByRole('button', { name: '开始同步', exact: true })).toBeDisabled();
-    await expect(page.getByText('这一天暂无活动', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '开始同步', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: '请先登录 QQ', exact: true })).toBeVisible();
     for (const width of [1280, 900, 760, 375, 320]) {
       await page.setViewportSize({ width, height: 820 });
-      await expect(page.getByRole('heading', { name: '日程', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '请先登录 QQ', exact: true })).toBeVisible();
       for (const name of ['群消息', '日程', '设置']) await expect(page.getByRole('button', { name, exact: true }).first()).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       expect(await page.locator('section[aria-label="日程"]').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: `test-results/schedule-preview-${width}.png` });
     }
-    await page.getByRole('button', { name: '后7天', exact: true }).click();
-    await page.getByRole('button', { name: '回到今天', exact: true }).click();
-    await expect(page.getByLabel('跳转日期')).toHaveValue(chinaToday());
+    await expect(page.getByRole('button', { name: '前往设置', exact: true })).toBeVisible();
   } finally { await browser.close(); await new Promise<void>(resolve => server.httpServer.close(() => resolve())); }
 });

@@ -53,6 +53,6 @@ export const processingConfigSchema = z.object({
   since: z.number().int().min(0).optional(),
 }).strict();
 export const processingDetailsQuerySchema = z.object({
-  bucket: z.enum(['pending', 'running', 'completed']), since: z.number().int().min(0),
+  bucket: z.enum(['pending', 'running', 'completed', 'review']), since: z.number().int().min(0),
   offset: z.number().int().min(0).max(1_000_000).optional(), limit: z.number().int().min(1).max(200).optional(),
 }).strict();

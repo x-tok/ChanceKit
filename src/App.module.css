@@ -71,6 +71,7 @@
 .secondaryButton { border: 1px solid var(--line); color: var(--ink); background: white; }
 .textButton { border: 0; background: none; color: var(--green); padding: 8px 4px; font-size: 12px; }
 .workspace { flex: 1; display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; }
+.workspaceLoggedOut { flex: 1; min-height: 0; display: grid; place-items: center; background: white; }
 .groupPanel { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .groupPanelHeading { display: flex; align-items: center; justify-content: space-between; padding: 17px 16px 8px 22px; }
 .groupPanelHeading h1 { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 10px; }

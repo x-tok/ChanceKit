@@ -67,8 +67,9 @@ app.whenReady().then(async () => {
       if (data.ready) resolve();
       if (data.event?.type === 'state') {
         archiveAccountId = data.event.state.localAccount?.id ?? '';
-        processor?.setAccount(archiveAccountId);
-        const signature = JSON.stringify([archiveAccountId, data.event.state.groups
+        const processingAccountId = data.event.state.account?.id ?? '';
+        processor?.setAccount(processingAccountId);
+        const signature = JSON.stringify([processingAccountId, data.event.state.groups
           .filter((group: { followed: boolean }) => group.followed)
           .map((group: { id: string; name: string }) => [group.id, group.name])]);
         if (signature !== followedSignature) { followedSignature = signature; processor?.refresh(); }
@@ -160,7 +161,7 @@ app.whenReady().then(async () => {
       });
     },
     () => { if (!window?.isDestroyed()) window?.webContents.send('chancekit:event', { type: 'schedule' }); });
-  processor.setAccount(archiveAccountId);
+  processor.setAccount(initial.account?.id ?? '');
   ipcMain.handle('chancekit:schedule:list', (event, input) => {
     verifySender(event);
     const query = scheduleQuerySchema.parse(input);

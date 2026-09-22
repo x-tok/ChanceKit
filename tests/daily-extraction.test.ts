@@ -429,6 +429,8 @@ test('failed daily messages leave pending and expose their error in review', asy
   assert.equal(review.total, 1);
   assert.equal(review.items[0].state, 'failed');
   assert.equal(review.items[0].error, '模型输出格式错误');
+  assert.throws(() => daily.retry('a', 'missing-message'), /不存在|当前账号/);
+  assert.equal(daily.status('a').failed, 1);
 });
 
 test('links are classified before reading and oversized days split in stable source order', () => {
